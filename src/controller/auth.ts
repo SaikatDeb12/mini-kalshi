@@ -5,6 +5,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { JWTSecretKey } from "..";
 import { Wallet } from "../model/walletEvent";
+import { sndResponse } from "../utils/response";
 
 export async function registerUser(request: Request, response: Response) {
     try {
@@ -12,7 +13,7 @@ export async function registerUser(request: Request, response: Response) {
         const { success, error, data } = signUpSchema.safeParse(body);
         if (!success) {
             return response.status(400).json({
-                message: "invalid credentials",
+                message: "invalid input",
                 error: error.issues[0].message,
             });
         }
@@ -20,9 +21,11 @@ export async function registerUser(request: Request, response: Response) {
         const { username, password } = data;
         const userExists = await User.findOne({ username: username });
         if (userExists) {
-            return response.status(400).json({
-                message: "user with this username already exists",
-            });
+            return sndResponse(
+                response,
+                400,
+                "user with this username already exists",
+            );
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -38,9 +41,7 @@ export async function registerUser(request: Request, response: Response) {
         });
     } catch (error) {
         console.log("error while registering a user : ", error);
-        return response.status(500).json({
-            message: "failed to create user",
-        });
+        return sndResponse(response, 500, "failed to create user");
     }
 }
 
@@ -58,9 +59,7 @@ export async function loginUser(request: Request, response: Response) {
         const { username, password } = data;
         const userExists = await User.findOne({ username: username });
         if (!userExists) {
-            return response.status(401).json({
-                message: "invalid credentials",
-            });
+            return sndResponse(response, 401, "invalid credentials");
         }
 
         const validPassword = await bcrypt.compare(
@@ -68,9 +67,7 @@ export async function loginUser(request: Request, response: Response) {
             userExists.password,
         );
         if (!validPassword) {
-            return response.status(401).json({
-                message: "invalid credentials",
-            });
+            return sndResponse(response, 401, "invalid credentials");
         }
 
         const token = jwt.sign({ userId: userExists._id }, JWTSecretKey);
@@ -80,9 +77,7 @@ export async function loginUser(request: Request, response: Response) {
         });
     } catch (error) {
         console.log("error while logging in : ", error);
-        response.status(500).json({
-            message: "failed to log in",
-        });
+        return sndResponse(response, 500, "failed to login");
     }
 }
 
@@ -91,7 +86,7 @@ export async function onRamp(request: Request, response: Response) {
         const body = request.body;
         const { success, error, data } = onRampSchema.safeParse(body);
         if (!success) {
-            return response.status(401).json({
+            return response.status(400).json({
                 message: "invalid input",
                 error: error.issues[0].message,
             });
@@ -105,13 +100,11 @@ export async function onRamp(request: Request, response: Response) {
         );
 
         if (!user) {
-            return response.status(404).json({
-                message: "user not found",
-            });
+            return sndResponse(response, 404, "user not found");
         }
         // done with the update
-        // also need to keep the changes in the wallet table
 
+        // also need to create new record for every amount change in the wallet table
         await Wallet.create({
             userId: request.userId,
             tx_type: "onramp",
@@ -119,12 +112,33 @@ export async function onRamp(request: Request, response: Response) {
         });
         return response.status(200).json({
             message: "balance added successfully",
-            balance: amount,
+            balance: user.balance,
         });
     } catch (error) {
         console.log("error which onramp: ", error);
-        return response.status(500).json({
-            message: "failed to update the balance",
+        return sndResponse(response, 500, "failed to update the balance");
+    }
+}
+
+export async function getProfile(request: Request, response: Response) {
+    try {
+        const userId = request.userId;
+        if (!userId) {
+            return sndResponse(response, 404, "user not found");
+        }
+
+        // here we exclude the password field
+        const user = await User.findOne({ _id: userId }).select("-password");
+        if (!user) {
+            return sndResponse(response, 404, "user not found");
+        }
+
+        return response.status(200).json({
+            message: "user found",
+            user: user,
         });
+    } catch (error) {
+        console.log(error);
+        return sndResponse(response, 500, "failed to get user's profile");
     }
 }
