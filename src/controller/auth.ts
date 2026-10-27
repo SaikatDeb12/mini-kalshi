@@ -142,3 +142,20 @@ export async function getProfile(request: Request, response: Response) {
         return sndResponse(response, 500, "failed to get user's profile");
     }
 }
+
+export async function getWalletHistory(request: Request, response: Response) {
+    try {
+        const userId = request.userId;
+        if (!userId) {
+            return sndResponse(response, 404, "user not found");
+        }
+
+        const transactions = await Wallet.find({ userId: userId });
+        return response.status(200).json({
+            transactions: transactions,
+        });
+    } catch (error) {
+        console.log(error);
+        return sndResponse(response, 500, "failed to extract wallet history");
+    }
+}
