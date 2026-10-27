@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-export const MarketModel = new Schema(
+export const marketModel = new Schema(
     {
         title: {
             type: String,
@@ -35,4 +35,4 @@ export const MarketModel = new Schema(
     },
 );
 
-export const Market = mongoose.model("Market", MarketModel);
+export const Market = mongoose.model("Market", marketModel);
