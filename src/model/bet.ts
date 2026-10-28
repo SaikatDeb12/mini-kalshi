@@ -15,6 +15,11 @@ const betSchema = new Schema({
         type: Number,
         required: true,
     },
+    side: {
+        type: String,
+        enum: ["yes", "no"],
+        required: true,
+    },
 });
 
 export const Bet = mongoose.model("Bet", betSchema);
