@@ -4,6 +4,7 @@ export const createMarketSchema = z.object({
     title: z.string().min(3),
     initialWager: z.number().int().positive(),
     side: z.enum(["yes", "no"]),
+    // validate the date
     expiry: z.coerce.date(),
 });
 

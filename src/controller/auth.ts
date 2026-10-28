@@ -70,7 +70,11 @@ export async function loginUser(request: Request, response: Response) {
             return sndResponse(response, 401, "invalid credentials");
         }
 
-        const token = jwt.sign({ userId: userExists._id }, JWTSecretKey);
+        const token = jwt.sign(
+            { userId: userExists._id.toString() },
+            JWTSecretKey,
+            { expiresIn: "1d" },
+        );
         response.status(200).json({
             message: "user logged in successfully",
             token: token,
@@ -138,7 +142,7 @@ export async function getProfile(request: Request, response: Response) {
             user: user,
         });
     } catch (error) {
-        console.log(error);
+        console.log("error fetching profile", error);
         return sndResponse(response, 500, "failed to get user's profile");
     }
 }
@@ -155,7 +159,7 @@ export async function getWalletHistory(request: Request, response: Response) {
             transactions: transactions,
         });
     } catch (error) {
-        console.log(error);
+        console.log("failed to fetch wallet history", error);
         return sndResponse(response, 500, "failed to extract wallet history");
     }
 }
