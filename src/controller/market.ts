@@ -1,9 +1,11 @@
 import type { Request, Response } from "express";
-import { createMarketSchema } from "../types/market";
+import { createMarketSchema, placeBetSchema } from "../types/market";
 import { Market } from "../model/market";
 import { sndResponse } from "../utils/response";
 import { User } from "../model/user";
 import { Wallet } from "../model/walletEvent";
+import { Bet } from "../model/bet";
+
 export async function createMarket(req: Request, res: Response) {
     try {
         const body = req.body;
@@ -64,5 +66,26 @@ export async function createMarket(req: Request, res: Response) {
     } catch (error) {
         console.log("error creating market: ", error);
         return sndResponse(res, 500, "failed to create market");
+    }
+}
+
+export async function getAllMarket(req: Request, res: Response) {
+    try {
+        const userId = req.userId;
+        if (!userId) {
+            return sndResponse(res, 404, "user not found");
+        }
+
+        const marketList = await Market.find({ creatorId: userId }).populate(
+            "creatorId",
+            "username",
+        );
+        return res.status(200).json({
+            message: "fetched all the markets",
+            markets: marketList,
+        });
+    } catch (err) {
+        console.log("error fetching all the market", err);
+        return sndResponse(res, 500, "failed to fetch all markets");
     }
 }
