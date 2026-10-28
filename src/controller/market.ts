@@ -174,3 +174,16 @@ export async function placeBet(req: Request, res: Response) {
         return sndResponse(res, 500, "failed to place bet");
     }
 }
+
+export async function getBets(req: Request, res: Response) {
+    const userId = req.userId;
+    if (!userId) {
+        return sndResponse(res, 404, "user not found");
+    }
+
+    const bets = await Bet.findOne({ userId: userId }).populate("marketId");
+    return res.status(200).json({
+        message: "list of user's bets",
+        bets: bets,
+    });
+}
