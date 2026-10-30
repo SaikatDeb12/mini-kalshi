@@ -18,7 +18,7 @@ export async function registerUser(request: Request, response: Response) {
             });
         }
 
-        const { username, password } = data;
+        const { username, password, role } = data;
         const userExists = await User.findOne({ username: username });
         if (userExists) {
             return sndResponse(
@@ -32,12 +32,14 @@ export async function registerUser(request: Request, response: Response) {
         const newUser = await User.create({
             username: username,
             password: hashedPassword,
+            role: role,
             balance: 0,
         });
 
         return response.status(201).json({
             message: "user created successfully",
             id: newUser._id,
+            role: role,
         });
     } catch (error) {
         console.log("error while registering a user : ", error);
@@ -71,7 +73,7 @@ export async function loginUser(request: Request, response: Response) {
         }
 
         const token = jwt.sign(
-            { userId: userExists._id.toString() },
+            { userId: userExists._id.toString(), role: userExists.role },
             JWTSecretKey,
             { expiresIn: "1d" },
         );
