@@ -1,12 +1,9 @@
 import { Router } from "express";
-import {
-    getProfile,
-    getTransactionHistory,
-    loginUser,
-    onRamp,
-    registerUser,
-} from "../controller/auth";
 import { authMiddleware } from "../middleware/auth";
+import { authController } from "../controller/auth";
+
+const { registerUser, loginUser, onRamp, getProfile, getTransactionHistory } =
+    authController;
 
 export const authRouter = Router();
 authRouter.post("/signup", registerUser);
