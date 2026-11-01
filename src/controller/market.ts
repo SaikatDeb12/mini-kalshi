@@ -1,10 +1,13 @@
 import type { Request, Response } from "express";
-import { createMarketSchema, placeBetSchema } from "../types/market";
+import { createMarketSchema, createOrderSchema } from "../types/market";
 import { Market } from "../model/market";
 import { sendResponse } from "../utils/response";
 import { User } from "../model/user";
 import { Orderbook } from "../model/orderbook";
 import mongoose from "mongoose";
+import { Order } from "../model/order";
+import { Log } from "../model/tx_logs";
+import { Stock } from "../model/stock_balance";
 
 export async function createMarket(req: Request, res: Response) {
     try {
@@ -115,21 +118,21 @@ export async function getAllMarket(req: Request, res: Response) {
     }
 }
 
-export async function placeBet(req: Request, res: Response) {
+export async function placeOrder(req: Request, res: Response) {
     try {
-        const body = req.body;
-        const { success, error, data } = placeBetSchema.safeParse(body);
-        if (!success) {
-            return res.status(400).json({
-                message: "invalid input",
-                error: error.issues[0].message,
-            });
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return sendResponse(res, 404, "user not found");
         }
 
-        const { marketId, amount } = data;
-        const market = await Market.findOne({ _id: marketId });
+        const { marketString } = req.params;
+        const marketId = Array.isArray(marketString)
+            ? marketString[0]
+            : marketString;
+
+        const market = await Market.findById(marketId);
         if (!market) {
-            return sendResponse(res, 404, "no market found");
+            return sendResponse(res, 404, "market not found");
         }
 
         if (market.resolution == "yes") {
@@ -148,69 +151,91 @@ export async function placeBet(req: Request, res: Response) {
             );
         }
 
-        const existingBets = await Bet.find({
-            marketId: marketId,
-        });
-
-        const totalBets = existingBets.reduce(
-            (sum, bet) => sum + bet.betAmount,
-            0,
-        );
-
-        if (totalBets + amount > market.initialWager) {
-            return sendResponse(
-                res,
-                400,
-                "bet exceeds remaining available amount",
-            );
+        const body = req.body;
+        const { success, error, data } = createOrderSchema.safeParse(body);
+        if (!success) {
+            return res.status(400).json({
+                message: "invalid input",
+                error: error.issues[0].message,
+            });
         }
 
-        const user = await User.findOne({ _id: req.userId });
-        if (!user) {
-            return sendResponse(res, 404, "user not found");
-        }
+        const { side, type, price, quantity } = data;
+        const totalAmount = price * quantity;
 
-        if (user.balance < amount) {
-            return sendResponse(res, 400, "insufficient balance");
-        }
+        const result = await mongoose.connection.transaction(
+            async (session) => {
+                const orderbook = await Orderbook.findOne({
+                    marketId: market._id,
+                }).session(session);
 
-        user.balance -= amount;
-        await user.save();
+                if (!orderbook) {
+                    return sendResponse(res, 404, "orderbook not found");
+                }
 
-        const marketSide = market.side;
-        const userSide = marketSide === "yes" ? "no" : "yes";
-        const newBet = await Bet.create({
-            userId: req.userId,
-            marketId: marketId,
-            betAmount: amount,
-            side: userSide,
-        });
+                if (type == "buy") {
+                    await User.findOneAndUpdate(
+                        { _id: user._id },
+                        {
+                            $inc: {
+                                availableUSD: -totalAmount,
+                                lockedUSD: totalAmount,
+                            },
+                        },
+                        { returnDocument: "after", session: session },
+                    );
+                } else {
+                    await Stock.findOneAndUpdate(
+                        {
+                            userId: user._id,
+                            marketId: market._id,
+                            outcome: side,
+                            $expr: {
+                                $gte: [
+                                    { $subtract: ["$qty", "$lockedQty"] },
+                                    quantity,
+                                ],
+                            },
+                        },
+                        { $inc: { lockedQty: quantity } },
+                        { returnDocument: "after", session: session },
+                    );
+                }
 
-        await Wallet.create({
-            userId: req.userId,
-            tx_type: "bet",
-            externalId: {
-                betId: newBet._id,
-                marketId: marketId,
+                const [newOrder] = await Order.create(
+                    [
+                        {
+                            userId: user._id,
+                            orderbookId: orderbook._id,
+                            type: type,
+                            price: price,
+                            quantity: quantity,
+                            remainingQuantity: quantity,
+                            status: "open",
+                        },
+                    ],
+                    { session },
+                );
+
+                await Log.create({
+                    userId: req.userId,
+                    marketId: market._id,
+                    orderId: newOrder._id,
+                    outcome: side,
+                    action: "lock",
+                    qtyChange: 0,
+                    lockedQtyChange: type == "sell" ? quantity : 0,
+                    lockedUSDChange: type == "buy" ? totalAmount : 0,
+                    balanceUSDChange: type == "buy" ? totalAmount * -1 : 0,
+                });
             },
-            amount: amount * -1,
+        );
+        return res.status(200).json({
+            message: "order placed successfully",
+            result: result,
         });
-        return sendResponse(res, 200, "bet placed successfully");
     } catch (error) {
-        console.log("error while placing bet : ", error);
-        return sendResponse(res, 500, "failed to place bet");
+        console.log("error while placing order : ", error);
+        return sendResponse(res, 500, "failed to place order");
     }
-}
-
-export async function getBets(req: Request, res: Response) {
-    const userId = req.userId;
-    if (!userId) {
-        return sendResponse(res, 404, "user not found");
-    }
-
-    const bets = await Bet.findOne({ userId: userId }).populate("marketId");
-    return res.status(200).json({
-        message: "list of user's bets",
-        bets: bets,
-    });
 }

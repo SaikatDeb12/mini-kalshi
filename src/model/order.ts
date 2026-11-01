@@ -11,7 +11,7 @@ const orderSchema = new Schema(
             ref: "Orderbook",
             required: true,
         },
-        side: {
+        type: {
             type: String,
             enum: ["buy", "sell"],
             required: true,

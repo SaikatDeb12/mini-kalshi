@@ -10,14 +10,17 @@ const txLogsSchema = new Schema(
         marketId: {
             type: Schema.Types.ObjectId,
             ref: "Market",
+            required: true,
         },
         orderId: {
             type: Schema.Types.ObjectId,
             ref: "Order",
+            required: true,
         },
         fillId: {
             type: Schema.Types.ObjectId,
             ref: "Fill",
+            required: false,
         },
         outcome: {
             type: String,
@@ -41,7 +44,13 @@ const txLogsSchema = new Schema(
         qtyChange: {
             type: Number,
         },
+        lockedQtyChange: {
+            type: Number,
+        },
         balanceUSDChange: {
+            type: Number,
+        },
+        lockedUSDChange: {
             type: Number,
         },
     },
