@@ -13,14 +13,18 @@ const userModel = new Schema(
             type: String,
             required: true,
         },
-        balance: {
-            type: Number,
-            default: 0,
-        },
         role: {
             type: String,
             enum: ["user", "admin"],
             default: "user",
+        },
+        availableUSD: {
+            type: Number,
+            default: 0,
+        },
+        lockedUSD: {
+            type: Number,
+            default: 0,
         },
     },
     {

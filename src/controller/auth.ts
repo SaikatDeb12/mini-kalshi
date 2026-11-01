@@ -4,15 +4,15 @@ import { User } from "../model/user";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { JWTSecretKey } from "..";
-import { Wallet } from "../model/walletEvent";
 import { sndResponse } from "../utils/response";
+import { Log } from "../model/tx_logs";
 
-export async function registerUser(request: Request, response: Response) {
+export async function registerUser(req: Request, res: Response) {
     try {
-        const body = request.body;
+        const body = req.body;
         const { success, error, data } = signUpSchema.safeParse(body);
         if (!success) {
-            return response.status(400).json({
+            return res.status(400).json({
                 message: "invalid input",
                 error: error.issues[0].message,
             });
@@ -22,7 +22,7 @@ export async function registerUser(request: Request, response: Response) {
         const userExists = await User.findOne({ username: username });
         if (userExists) {
             return sndResponse(
-                response,
+                res,
                 400,
                 "user with this username already exists",
             );
@@ -33,26 +33,25 @@ export async function registerUser(request: Request, response: Response) {
             username: username,
             password: hashedPassword,
             role: role,
-            balance: 0,
         });
 
-        return response.status(201).json({
+        return res.status(201).json({
             message: "user created successfully",
             id: newUser._id,
             role: role,
         });
     } catch (error) {
         console.log("error while registering a user : ", error);
-        return sndResponse(response, 500, "failed to create user");
+        return sndResponse(res, 500, "failed to create user");
     }
 }
 
-export async function loginUser(request: Request, response: Response) {
+export async function loginUser(req: Request, res: Response) {
     try {
-        const body = request.body;
+        const body = req.body;
         const { success, error, data } = signInSchema.safeParse(body);
         if (!success) {
-            return response.status(401).json({
+            return res.status(401).json({
                 message: "invalid credentials",
                 error: error.issues[0].message,
             });
@@ -61,7 +60,7 @@ export async function loginUser(request: Request, response: Response) {
         const { username, password } = data;
         const userExists = await User.findOne({ username: username });
         if (!userExists) {
-            return sndResponse(response, 401, "invalid credentials");
+            return sndResponse(res, 401, "invalid credentials");
         }
 
         const validPassword = await bcrypt.compare(
@@ -69,7 +68,7 @@ export async function loginUser(request: Request, response: Response) {
             userExists.password,
         );
         if (!validPassword) {
-            return sndResponse(response, 401, "invalid credentials");
+            return sndResponse(res, 401, "invalid credentials");
         }
 
         const token = jwt.sign(
@@ -77,22 +76,22 @@ export async function loginUser(request: Request, response: Response) {
             JWTSecretKey,
             { expiresIn: "1d" },
         );
-        response.status(200).json({
+        res.status(200).json({
             message: "user logged in successfully",
             token: token,
         });
     } catch (error) {
         console.log("error while logging in : ", error);
-        return sndResponse(response, 500, "failed to login");
+        return sndResponse(res, 500, "failed to login");
     }
 }
 
-export async function onRamp(request: Request, response: Response) {
+export async function onRamp(req: Request, res: Response) {
     try {
-        const body = request.body;
+        const body = req.body;
         const { success, error, data } = onRampSchema.safeParse(body);
         if (!success) {
-            return response.status(400).json({
+            return res.status(400).json({
                 message: "invalid input",
                 error: error.issues[0].message,
             });
@@ -100,68 +99,68 @@ export async function onRamp(request: Request, response: Response) {
 
         const { amount } = data;
         const user = await User.findByIdAndUpdate(
-            { _id: request.userId },
-            { $inc: { balance: amount } },
+            { _id: req.userId },
+            { $inc: { availableUSD: amount } },
             { returnDocument: "after" },
         );
 
         if (!user) {
-            return sndResponse(response, 404, "user not found");
+            return sndResponse(res, 404, "user not found");
         }
         // done with the update
 
         // also need to create new record for every amount change in the wallet table
-        await Wallet.create({
-            userId: request.userId,
-            tx_type: "onramp",
-            amount: amount,
+        await Log.create({
+            userId: req.userId,
+            action: "onramp",
+            qtyChange: amount,
         });
-        return response.status(200).json({
+        return res.status(200).json({
             message: "balance added successfully",
-            balance: user.balance,
+            balance: user.availableUSD,
         });
     } catch (error) {
         console.log("error which onramp: ", error);
-        return sndResponse(response, 500, "failed to update the balance");
+        return sndResponse(res, 500, "failed to update the balance");
     }
 }
 
-export async function getProfile(request: Request, response: Response) {
+export async function getProfile(req: Request, res: Response) {
     try {
-        const userId = request.userId;
+        const userId = req.userId;
         if (!userId) {
-            return sndResponse(response, 404, "user not found");
+            return sndResponse(res, 404, "user not found");
         }
 
         // here we exclude the password field
         const user = await User.findOne({ _id: userId }).select("-password");
         if (!user) {
-            return sndResponse(response, 404, "user not found");
+            return sndResponse(res, 404, "user not found");
         }
 
-        return response.status(200).json({
+        return res.status(200).json({
             message: "user found",
             user: user,
         });
     } catch (error) {
         console.log("error fetching profile", error);
-        return sndResponse(response, 500, "failed to get user's profile");
+        return sndResponse(res, 500, "failed to get user's profile");
     }
 }
 
-export async function getWalletHistory(request: Request, response: Response) {
+export async function getWalletHistory(req: Request, res: Response) {
     try {
-        const userId = request.userId;
+        const userId = req.userId;
         if (!userId) {
-            return sndResponse(response, 404, "user not found");
+            return sndResponse(res, 404, "user not found");
         }
 
-        const transactions = await Wallet.find({ userId: userId });
-        return response.status(200).json({
+        const transactions = await Log.find({ userId: userId });
+        return res.status(200).json({
             transactions: transactions,
         });
     } catch (error) {
         console.log("failed to fetch wallet history", error);
-        return sndResponse(response, 500, "failed to extract wallet history");
+        return sndResponse(res, 500, "failed to extract wallet history");
     }
 }

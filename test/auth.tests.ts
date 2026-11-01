@@ -1,28 +1,26 @@
 import { test, expect } from "bun:test";
 import axios from "axios";
 
-const BACKEND_URL = "http://localhost:8000/api/auth";
+const BACKEND_URL = "http://localhost:8000/api/v1/auth";
 
 const USERNAME = `takias-${Math.random()}`;
 
-test("If username is small, the signup endpoint should return a 411 status code", async () => {
+test("if the length of username < 3", async () => {
     try {
         const response = await axios.post(`${BACKEND_URL}/signup`, {
             username: "a",
             password: "asdasdadskjadskj",
         });
-
         expect.fail();
-    } catch (e) {
-        console.log(e.status);
-        expect(e.status).toBe(404);
+    } catch (error) {
+        console.log(error.status);
+        expect(error.status).toBe(400);
     }
 });
 
-test("If the username and pasword are not present it should return a 411", async () => {
+test("if username and password not present", async () => {
     try {
         const response = await axios.post(`${BACKEND_URL}/signup`, {});
-
         expect.fail();
     } catch (e) {
         console.log(e.status);
@@ -30,8 +28,8 @@ test("If the username and pasword are not present it should return a 411", async
     }
 });
 
-test("If the username and pasword are not present it should return a 412", async () => {
-    const res = await axios.post(`${BACKEND_URL}/signup`, {
+test("If the username and pasword are wrong it should return a 401", async () => {
+    const res = await axios.post(`${BACKEND_URL}/signin`, {
         username: USERNAME,
         password: "123123",
     });

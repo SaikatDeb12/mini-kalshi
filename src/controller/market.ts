@@ -3,8 +3,6 @@ import { createMarketSchema, placeBetSchema } from "../types/market";
 import { Market } from "../model/market";
 import { sndResponse } from "../utils/response";
 import { User } from "../model/user";
-import { Wallet } from "../model/walletEvent";
-import { Bet } from "../model/bet";
 
 export async function createMarket(req: Request, res: Response) {
     try {
