@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { JWTSecretKey } from "..";
-import { sndResponse } from "../utils/response";
+import { sendResponse } from "../utils/response";
 
 export async function authMiddleware(
     request: Request,
@@ -27,13 +27,13 @@ export async function authMiddleware(
             typeof validToken.userId !== "string" ||
             !["user", "admin"].includes(validToken.role)
         ) {
-            return sndResponse(response, 401, "invalid token payload");
+            return sendResponse(response, 401, "invalid token payload");
         }
 
         request.userId = validToken.userId;
         request.role = validToken.role;
         next();
     } catch (error) {
-        return sndResponse(response, 401, "invalid token");
+        return sendResponse(response, 401, "invalid token");
     }
 }

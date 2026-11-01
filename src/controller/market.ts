@@ -1,8 +1,10 @@
 import type { Request, Response } from "express";
 import { createMarketSchema, placeBetSchema } from "../types/market";
 import { Market } from "../model/market";
-import { sndResponse } from "../utils/response";
+import { sendResponse } from "../utils/response";
 import { User } from "../model/user";
+import { Orderbook } from "../model/orderbook";
+import mongoose from "mongoose";
 
 export async function createMarket(req: Request, res: Response) {
     try {
@@ -15,10 +17,10 @@ export async function createMarket(req: Request, res: Response) {
             });
         }
 
-        const { title, initialWager, side, expiry } = data;
+        const { title, expiry } = data;
         // 1) check the expiry
         if (expiry <= new Date()) {
-            return sndResponse(
+            return sendResponse(
                 res,
                 400,
                 "expiry data can only be in the future",
@@ -28,40 +30,55 @@ export async function createMarket(req: Request, res: Response) {
         // 2) find user and check if they have enough balance or not
         const user = await User.findById(req.userId);
         if (!user) {
-            return sndResponse(res, 404, "user not found");
+            return sendResponse(res, 404, "user not found");
         }
 
-        if (user.balance < initialWager) {
-            return sndResponse(res, 400, "insufficient balance");
-        }
-        user.balance -= initialWager;
-        await user.save();
+        // 2 - 3) create market & orderBook
+        const newMarket = await mongoose.connection.transaction(
+            async (session) => {
+                const markets = await Market.create(
+                    [
+                        {
+                            title,
+                            creatorId: user._id,
+                            totalIssued: 0,
+                            expiry,
+                            resolution: null,
+                        },
+                    ],
+                    { session },
+                );
 
-        // 3) create market
-        const newMarket = await Market.create({
-            title: title,
-            initialWager: initialWager,
-            side: side,
-            creatorId: req.userId,
-            expiry: expiry,
-        });
+                const market = markets[0];
+                await Orderbook.create(
+                    [
+                        { outcome: "yes", marketId: market._id },
+                        { outcome: "no", marketId: market._id },
+                    ],
+                    { session },
+                );
 
-        // 4) update wallet tx_type and amount
-        await Wallet.create({
-            userId: req.userId,
-            tx_type: "created",
-            externalId: { marketId: newMarket._id },
-            amount: initialWager * -1,
-        });
+                return market._id;
+            },
+        );
 
-        //done
+        // const newYesOrderbook = await Orderbook.create({
+        //     outcome: "yes",
+        //     marketId: newMarket._id,
+        // });
+        //
+        // const newNoOrderbook = await Orderbook.create({
+        //     outcome: "no",
+        //     marketId: newMarket._id,
+        // });
+
         return res.status(201).json({
             message: "market created successfully",
             marketId: newMarket._id,
         });
     } catch (error) {
         console.log("error creating market: ", error);
-        return sndResponse(res, 500, "failed to create market");
+        return sendResponse(res, 500, "failed to create market");
     }
 }
 
@@ -69,20 +86,32 @@ export async function getAllMarket(req: Request, res: Response) {
     try {
         const userId = req.userId;
         if (!userId) {
-            return sndResponse(res, 404, "user not found");
+            return sendResponse(res, 401, "invalid token");
         }
 
-        const marketList = await Market.find({ creatorId: userId }).populate(
-            "creatorId",
-            "username",
-        );
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return sendResponse(res, 404, "user not found");
+        }
+
+        const page = Number(req.query.page ?? 1);
+        const limit = Number(req.query.limit ?? 10);
+
+        const marketList = await Market.find({ creatorId: user._id })
+            .select("-creatorId")
+            .sort({ _id: -1 })
+            .skip((page - 1) * limit)
+            .limit(limit);
+
         return res.status(200).json({
             message: "fetched all the markets",
+            page: page,
+            limit: limit,
             markets: marketList,
         });
     } catch (err) {
         console.log("error fetching all the market", err);
-        return sndResponse(res, 500, "failed to fetch all markets");
+        return sendResponse(res, 500, "failed to fetch all markets");
     }
 }
 
@@ -100,19 +129,19 @@ export async function placeBet(req: Request, res: Response) {
         const { marketId, amount } = data;
         const market = await Market.findOne({ _id: marketId });
         if (!market) {
-            return sndResponse(res, 404, "no market found");
+            return sendResponse(res, 404, "no market found");
         }
 
         if (market.resolution == "yes") {
-            return sndResponse(res, 400, "market already resolved");
+            return sendResponse(res, 400, "market already resolved");
         }
 
         if (market.expiry <= new Date()) {
-            return sndResponse(res, 400, "market already expired");
+            return sendResponse(res, 400, "market already expired");
         }
 
         if (market.creatorId.toString() == req.userId) {
-            return sndResponse(
+            return sendResponse(
                 res,
                 400,
                 "creator cannot bet against there own market",
@@ -129,7 +158,7 @@ export async function placeBet(req: Request, res: Response) {
         );
 
         if (totalBets + amount > market.initialWager) {
-            return sndResponse(
+            return sendResponse(
                 res,
                 400,
                 "bet exceeds remaining available amount",
@@ -138,11 +167,11 @@ export async function placeBet(req: Request, res: Response) {
 
         const user = await User.findOne({ _id: req.userId });
         if (!user) {
-            return sndResponse(res, 404, "user not found");
+            return sendResponse(res, 404, "user not found");
         }
 
         if (user.balance < amount) {
-            return sndResponse(res, 400, "insufficient balance");
+            return sendResponse(res, 400, "insufficient balance");
         }
 
         user.balance -= amount;
@@ -166,17 +195,17 @@ export async function placeBet(req: Request, res: Response) {
             },
             amount: amount * -1,
         });
-        return sndResponse(res, 200, "bet placed successfully");
+        return sendResponse(res, 200, "bet placed successfully");
     } catch (error) {
         console.log("error while placing bet : ", error);
-        return sndResponse(res, 500, "failed to place bet");
+        return sendResponse(res, 500, "failed to place bet");
     }
 }
 
 export async function getBets(req: Request, res: Response) {
     const userId = req.userId;
     if (!userId) {
-        return sndResponse(res, 404, "user not found");
+        return sendResponse(res, 404, "user not found");
     }
 
     const bets = await Bet.findOne({ userId: userId }).populate("marketId");

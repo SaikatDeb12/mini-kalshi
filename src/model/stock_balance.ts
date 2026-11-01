@@ -12,22 +12,20 @@ export const stockBalance = new Schema(
             ref: "Market",
             required: true,
         },
-        side: {
+        outcome: {
             type: String,
-            enum: ["buy", "sell"],
-            required: true,
-        },
-        price: {
-            type: Number,
+            enum: ["yes", "no"],
             required: true,
         },
         qty: {
             type: Number,
             required: true,
+            default: 0,
         },
         lockedQty: {
             type: Number,
             required: true,
+            default: 0,
         },
     },
     {

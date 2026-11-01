@@ -6,9 +6,9 @@ const orderSchema = new Schema(
             ref: "User",
             required: true,
         },
-        marketId: {
+        orderbookId: {
             type: Schema.Types.ObjectId,
-            ref: "Market",
+            ref: "Orderbook",
             required: true,
         },
         side: {
@@ -19,8 +19,6 @@ const orderSchema = new Schema(
         price: {
             type: Number,
             required: true,
-            min: 1,
-            max: 99,
         },
         quantity: {
             type: Number,
