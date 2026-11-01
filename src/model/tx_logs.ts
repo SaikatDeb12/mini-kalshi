@@ -4,6 +4,7 @@ const txLogsSchema = new Schema({
     userId: {
         type: Schema.Types.ObjectId,
         ref: "User",
+        required: true,
     },
     marketId: {
         type: Schema.Types.ObjectId,
@@ -30,7 +31,7 @@ const txLogsSchema = new Schema({
     qtyChange: {
         type: Number,
     },
-    availableUSDChange: {
+    balanceUSDChange: {
         type: Number,
     },
 });

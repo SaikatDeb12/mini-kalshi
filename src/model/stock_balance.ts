@@ -20,18 +20,14 @@ export const stockBalance = new Schema(
         price: {
             type: Number,
             required: true,
-            min: 1,
-            max: 99,
         },
         qty: {
             type: Number,
             required: true,
-            min: 1,
         },
         lockedQty: {
             type: Number,
             required: true,
-            min: 1,
         },
     },
     {
