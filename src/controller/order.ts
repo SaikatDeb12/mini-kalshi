@@ -7,6 +7,7 @@ import { sendResponse } from "../utils/response";
 import { Order } from "../model/order";
 import { Log } from "../model/tx_logs";
 import { Stock } from "../model/stock_balance";
+import { createOrderSchema } from "../types/market";
 
 export async function placeOrder(req: Request, res: Response) {
     try {
