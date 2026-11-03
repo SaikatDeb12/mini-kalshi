@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-const userModel = new Schema(
+const userSchema = new Schema(
     {
         username: {
             type: String,
@@ -26,10 +26,14 @@ const userModel = new Schema(
             type: Number,
             default: 0,
         },
+        matchedCount: {
+            type: Number,
+            default: 0,
+        },
     },
     {
         timestamps: true,
     },
 );
 
-export const User = mongoose.model("User", userModel);
+export const User = mongoose.model("User", userSchema);

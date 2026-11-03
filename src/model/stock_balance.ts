@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-export const stockBalance = new Schema(
+export const stockSchema = new Schema(
     {
         userId: {
             type: Schema.Types.ObjectId,
@@ -27,10 +27,14 @@ export const stockBalance = new Schema(
             required: true,
             default: 0,
         },
+        matchedCount: {
+            type: Number,
+            default: 0,
+        },
     },
     {
         timestamps: true,
     },
 );
-
-export const Stock = mongoose.model("Stock", stockBalance);
+stockSchema.index({ userId: 1, marketId: 1, outcome: 1 }, { unique: true });
+export const Stock = mongoose.model("Stock", stockSchema);

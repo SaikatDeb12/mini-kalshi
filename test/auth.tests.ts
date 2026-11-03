@@ -1,59 +1,186 @@
-import { test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import axios from "axios";
 
-const BACKEND_URL = "http://localhost:8000/api/v1/auth";
-
-const USERNAME = `takias-${Math.random()}`;
-
-test("if the length of username < 3", async () => {
-    try {
-        const response = await axios.post(`${BACKEND_URL}/signup`, {
-            username: "a",
-            password: "asdasdadskjadskj",
-        });
-        expect.fail("expect 400");
-    } catch (error) {
-        if (axios.isAxiosError(error)) {
-            console.log(error.message);
-            expect(error.response?.status).toBe(400);
-        } else {
-            throw error;
-        }
-    }
+const api = axios.create({
+    baseURL: "http://localhost:8000/api/v1/auth",
+    validateStatus: () => true,
 });
 
-test("if username and password not present", async () => {
-    try {
-        const response = await axios.post(`${BACKEND_URL}/signup`, {});
-        expect.fail();
-    } catch (error) {
-        if (axios.isAxiosError(error)) {
-            console.log(error.message);
-            expect(error.response?.status).toBe(400);
-        } else {
-            throw error;
-        }
-    }
-});
+const USERNAME = `test-${crypto.randomUUID()}`;
+const PASSWORD = "TestPassword123!";
 
-test("If the username and pasword are wrong it should return a 401", async () => {
-    const res = await axios.post(`${BACKEND_URL}/signup`, {
+let token: string;
+
+beforeAll(async () => {
+    // Create a user for login and authenticated tests
+    const signup = await api.post("/signup", {
         username: USERNAME,
-        password: "123123",
+        password: PASSWORD,
     });
-    expect(res.status).toBe(201);
 
-    try {
-        await axios.post(`${BACKEND_URL}/signin`, {
-            username: USERNAME,
-            password: "123123",
+    expect(signup.status).toBe(201);
+
+    const login = await api.post("/signin", {
+        username: USERNAME,
+        password: PASSWORD,
+    });
+
+    expect(login.status).toBe(200);
+    token = login.data.token;
+});
+
+describe("Signup", () => {
+    test("should reject username shorter than 3 characters", async () => {
+        const res = await api.post("/signup", {
+            username: "a",
+            password: PASSWORD,
         });
-    } catch (error) {
-        if (axios.isAxiosError(error)) {
-            console.log(error.status);
-            expect(error.status).toBe(401);
-        } else {
-            throw error;
-        }
-    }
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should reject missing username and password", async () => {
+        const res = await api.post("/signup", {});
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should reject short password", async () => {
+        const res = await api.post("/signup", {
+            username: `user-${crypto.randomUUID()}`,
+            password: "123",
+        });
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should reject duplicate username", async () => {
+        const res = await api.post("/signup", {
+            username: USERNAME,
+            password: PASSWORD,
+        });
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should register a new user successfully", async () => {
+        const res = await api.post("/signup", {
+            username: `new-${crypto.randomUUID()}`,
+            password: PASSWORD,
+        });
+
+        expect(res.status).toBe(201);
+        expect(res.data.id).toBeDefined();
+        expect(res.data.message).toBe("user created successfully");
+    });
+});
+
+describe("Signin", () => {
+    test("should reject unknown username", async () => {
+        const res = await api.post("/signin", {
+            username: `unknown-${crypto.randomUUID()}`,
+            password: PASSWORD,
+        });
+
+        expect(res.status).toBe(401);
+    });
+
+    test("should reject incorrect password", async () => {
+        const res = await api.post("/signin", {
+            username: USERNAME,
+            password: "WrongPassword123!",
+        });
+
+        expect(res.status).toBe(401);
+    });
+
+    test("should reject missing credentials", async () => {
+        const res = await api.post("/signin", {});
+
+        expect(res.status).toBe(401);
+    });
+
+    test("should login successfully and return token", async () => {
+        const res = await api.post("/signin", {
+            username: USERNAME,
+            password: PASSWORD,
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.data.token).toBeString();
+        expect(res.data.token.length).toBeGreaterThan(0);
+    });
+});
+
+describe("Profile", () => {
+    test("should reject request without token", async () => {
+        const res = await api.get("/profile");
+
+        expect(res.status).toBe(401);
+    });
+
+    test("should reject invalid token", async () => {
+        const res = await api.get("/profile", {
+            headers: {
+                Authorization: "Bearer invalid-token",
+            },
+        });
+
+        expect(res.status).toBe(401);
+    });
+
+    test("should return user profile without password", async () => {
+        const res = await api.get("/profile", {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
+        });
+
+        expect(res.status).toBe(200);
+        expect(res.data.user.username).toBe(USERNAME);
+        expect(res.data.user.password).toBeUndefined();
+    });
+});
+
+describe("OnRamp", () => {
+    test("should reject negative amount", async () => {
+        const res = await api.post(
+            "/onramp",
+            { amount: -100 },
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should reject decimal amount", async () => {
+        const res = await api.post(
+            "/onramp",
+            { amount: 10.5 },
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should reject missing amount", async () => {
+        const res = await api.post(
+            "/onramp",
+            {},
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        expect(res.status).toBe(400);
+    });
+
+    test("should add balance successfully", async () => {
+        const res = await api.post(
+            "/onramp",
+            { amount: 100 },
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        expect(res.status).toBe(200);
+        expect(res.data.balance).toBe(100);
+    });
 });

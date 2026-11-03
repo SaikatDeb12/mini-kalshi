@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-const orderbookModel = new Schema(
+const orderbookSchema = new Schema(
     {
         outcome: {
             type: String,
@@ -16,4 +16,6 @@ const orderbookModel = new Schema(
     { timestamps: true },
 );
 
-export const Orderbook = mongoose.model("Orderbook", orderbookModel);
+orderbookSchema.index({ marketId: 1, outcome: 1 }, { unique: true });
+
+export const Orderbook = mongoose.model("Orderbook", orderbookSchema);

@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-export const marketModel = new Schema(
+export const marketSchema = new Schema(
     {
         title: {
             type: String,
@@ -25,12 +25,16 @@ export const marketModel = new Schema(
             enum: ["yes", "no", null],
             default: null,
         },
+        matchingVersion: {
+            type: Number,
+            default: 0,
+        },
     },
     {
         timestamps: true,
     },
 );
-export const Market = mongoose.model("Market", marketModel);
+export const Market = mongoose.model("Market", marketSchema);
 
 // export const marketModel = new Schema(
 //     {
