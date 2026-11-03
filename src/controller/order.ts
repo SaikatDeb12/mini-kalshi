@@ -243,7 +243,29 @@ export const orderController = {
                                     String(b.maker._id),
                                 ),
                         );
+                    } else {
+                        // sell yes matches buy yes
+                        const bids = await Order.find({
+                            orderbookId: sameSideOrderbook._id,
+                            type: "buy",
+                            price: { $gte: price },
+                            remainingQuantity: { $gt: 0 },
+                            status: { $in: ["open", "partial"] },
+                            userId: { $ne: userId },
+                        })
+                            .sort({ price: -1, createdAt: 1, _id: 1 })
+                            .session(session);
+
+                        for (const bid of bids) {
+                            eligibleOrders.push({
+                                maker: bid,
+                                kind: "transfer",
+                                effectivePrice: bid.price,
+                            });
+                        }
                     }
+
+                    // from here settle makers logic :
                 },
             );
             return res.status(200).json({
