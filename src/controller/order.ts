@@ -187,7 +187,7 @@ export const orderController = {
                         balanceUSDChange: type == "buy" ? totalAmount * -1 : 0,
                     });
 
-                    // matching similar order/candidate
+                    // matching similar order/candidate and storing it in the eligibleOrders
                     const eligibleOrders: {
                         maker: typeof newOrder;
                         kind: "transfer" | "mint";
@@ -204,6 +204,45 @@ export const orderController = {
                             remainingQuantity: { $gt: 0 },
                             status: { $in: ["open", "partial"] },
                         }).session(session);
+
+                        for (const ask of asks) {
+                            eligibleOrders.push({
+                                maker: ask,
+                                kind: "transfer",
+                                effectivePrice: ask.price,
+                            });
+                        }
+
+                        // for mint, when we want to 'buy' yes, but no one to 'sell' yes
+                        const oppositeBids = await Order.find({
+                            userId: { $ne: userId },
+                            orderbookId: oppositeSideOrderbook._id,
+                            type: "buy",
+                            price: { $gte: 100 - price },
+                            remainingQuantity: { $gt: 0 },
+                            status: { $in: ["open", "partial"] },
+                        }).session(session);
+
+                        for (const bid of oppositeBids) {
+                            eligibleOrders.push({
+                                maker: bid,
+                                kind: "mint",
+                                effectivePrice: 100 - price,
+                            });
+                        }
+
+                        // 1) lowerst price
+                        // 2) oldest order first
+                        // 3) compare ids
+                        eligibleOrders.sort(
+                            (a, b) =>
+                                a.effectivePrice - b.effectivePrice ||
+                                new Date(a.maker.createdAt).getTime() -
+                                new Date(b.maker.createdAt).getTime() ||
+                                String(a.maker._id).localeCompare(
+                                    String(b.maker._id),
+                                ),
+                        );
                     }
                 },
             );
