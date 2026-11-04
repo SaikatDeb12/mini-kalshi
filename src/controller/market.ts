@@ -56,7 +56,7 @@ export const marketController = {
                             { outcome: "yes", marketId: market._id },
                             { outcome: "no", marketId: market._id },
                         ],
-                        { session },
+                        { ordered: true, session },
                     );
 
                     return market._id;

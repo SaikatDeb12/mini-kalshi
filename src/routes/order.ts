@@ -5,4 +5,4 @@ import { orderController } from "../controller/order";
 const { placeOrder } = orderController;
 
 export const orderRouter = Router();
-orderRouter.post("/order", authMiddleware, placeOrder);
+orderRouter.post("/order/:marketString", authMiddleware, placeOrder);

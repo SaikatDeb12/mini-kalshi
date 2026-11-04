@@ -8,6 +8,7 @@ import { Order } from "../model/order";
 import { Log } from "../model/tx_logs";
 import { Stock } from "../model/stock_balance";
 import { createOrderSchema } from "../types/market";
+import { Fill } from "../model/fills";
 
 // valid market, userId
 // 1) reserve balance, stocks before booking
@@ -49,25 +50,19 @@ export const orderController = {
                         await Market.findById(marketIdParam).session(session);
 
                     if (!market) {
-                        return sendResponse(res, 404, "market not found");
+                        throw new Error("market not found");
                     }
 
                     if (market.resolution == "yes") {
-                        return sendResponse(
-                            res,
-                            400,
-                            "market already resolved",
-                        );
+                        throw new Error("market already resolved");
                     }
 
                     if (market.expiry <= new Date()) {
-                        return sendResponse(res, 400, "market already expired");
+                        throw new Error("market already expired");
                     }
 
                     if (market.creatorId.toString() == req.userId) {
-                        return sendResponse(
-                            res,
-                            400,
+                        throw new Error(
                             "creator cannot bet against there own market",
                         );
                     }
@@ -83,14 +78,14 @@ export const orderController = {
                     );
 
                     if (gate.matchedCount != 1) {
-                        return sendResponse(res, 403, "market closed");
+                        throw new Error("market closed");
                     }
 
                     const user = await User.findById(req.userId).session(
                         session,
                     );
                     if (!user) {
-                        return sendResponse(res, 404, "user not found");
+                        throw new Error("user not found");
                     }
                     const userId = user._id;
 
@@ -98,7 +93,7 @@ export const orderController = {
                         marketId: market._id,
                     });
                     if (!orderbook) {
-                        return sendResponse(res, 404, "orderbook not found");
+                        throw new Error("orderbook not found");
                     }
 
                     const sameSideOrderbook = await Orderbook.findOne({
@@ -108,11 +103,11 @@ export const orderController = {
 
                     const oppositeSideOrderbook = await Orderbook.findOne({
                         marketId: market._id,
-                        outcome: side == "yes" ? "yes" : "no",
+                        outcome: side == "yes" ? "no" : "yes",
                     });
 
                     if (!sameSideOrderbook || !oppositeSideOrderbook) {
-                        return sendResponse(res, 404, "orderbook not found");
+                        throw new Error("orderbook not found");
                     }
 
                     if (type == "buy") {
@@ -130,12 +125,8 @@ export const orderController = {
                             },
                             { returnDocument: "after", session: session },
                         );
-                        if (locked?.matchedCount != 1) {
-                            return sendResponse(
-                                res,
-                                400,
-                                "insufficient balance",
-                            );
+                        if (!locked) {
+                            throw new Error("insufficient balance");
                         }
                     } else {
                         // here we reserve for sell
@@ -155,7 +146,7 @@ export const orderController = {
                             { returnDocument: "after", session: session },
                         );
                         if (locked?.matchedCount != 1) {
-                            return sendResponse(res, 400, "insufficient stock");
+                            throw new Error("insufficient stocks");
                         }
                     }
 
@@ -214,6 +205,7 @@ export const orderController = {
                         }
 
                         // for mint, when we want to 'buy' yes, but no one to 'sell' yes
+                        // so matching is done b/w buy 'yes' and buy 'no'
                         const oppositeBids = await Order.find({
                             userId: { $ne: userId },
                             orderbookId: oppositeSideOrderbook._id,
@@ -227,7 +219,7 @@ export const orderController = {
                             eligibleOrders.push({
                                 maker: bid,
                                 kind: "mint",
-                                effectivePrice: 100 - price,
+                                effectivePrice: 100 - bid.price,
                             });
                         }
 
@@ -238,7 +230,7 @@ export const orderController = {
                             (a, b) =>
                                 a.effectivePrice - b.effectivePrice ||
                                 new Date(a.maker.createdAt).getTime() -
-                                new Date(b.maker.createdAt).getTime() ||
+                                    new Date(b.maker.createdAt).getTime() ||
                                 String(a.maker._id).localeCompare(
                                     String(b.maker._id),
                                 ),
@@ -266,6 +258,265 @@ export const orderController = {
                     }
 
                     // from here settle makers logic :
+                    for (const order of eligibleOrders) {
+                        if (newOrder.remainingQuantity == 0) break;
+                        const maker = order.maker;
+                        const matchedQty = Math.min(
+                            newOrder.remainingQuantity,
+                            maker.remainingQuantity,
+                        );
+                        if (matchedQty < 0) {
+                            continue;
+                        }
+
+                        const executionPrice = order.effectivePrice;
+                        const [fill] = await Fill.create(
+                            [
+                                {
+                                    makerOrderId: maker._id,
+                                    takerOrderId: newOrder._id,
+                                    matchType: order.kind,
+                                    makerPrice: maker.price,
+                                    takerPrice:
+                                        order.kind == "mint"
+                                            ? executionPrice
+                                            : maker.price,
+                                    qty: matchedQty,
+                                },
+                            ],
+                            { session },
+                        );
+
+                        if (order.kind == "mint") {
+                            // both side buy 'yes' and buy 'no' case
+                            const incomingLockedAmt =
+                                newOrder.price * matchedQty;
+                            const buyerExecutionPrice = 100 - maker.price;
+                            const actualCost = buyerExecutionPrice * matchedQty;
+                            const incomingRefund =
+                                incomingLockedAmt - actualCost;
+                            const existingLockedAmt = maker.price * matchedQty;
+
+                            // buyers : wants to buy 'yes' or 'no'
+                            const buyerUpdateResult = await User.updateOne(
+                                {
+                                    _id: newOrder.userId,
+                                    lockedUSD: { $gte: incomingLockedAmt },
+                                },
+                                {
+                                    $inc: {
+                                        lockedUSD: -incomingLockedAmt,
+                                        availableUSD: incomingRefund,
+                                    },
+                                },
+                                { session },
+                            );
+
+                            // makers : whose orders are already in the orderbook
+                            const makerResult = await User.updateOne(
+                                {
+                                    _id: maker.userId,
+                                    lockedUSD: { $gte: existingLockedAmt },
+                                },
+                                {
+                                    $inc: { lockedUSD: -existingLockedAmt },
+                                },
+                                { session },
+                            );
+
+                            if (
+                                buyerUpdateResult.matchedCount != 1 ||
+                                makerResult.matchedCount != 1
+                            ) {
+                                throw new Error("inconsistent balance");
+                            }
+
+                            //here distributing the new stock of 'yes' and 'no'
+                            await Stock.updateOne(
+                                {
+                                    userId: newOrder.userId,
+                                    marketId,
+                                    outcome: side,
+                                },
+                                {
+                                    $inc: { qty: matchedQty },
+                                    $setOnInsert: { lockedQty: 0 },
+                                },
+                                { upsert: true, session },
+                            );
+                            await Stock.updateOne(
+                                {
+                                    userId: maker.userId,
+                                    marketId,
+                                    outcome: side == "yes" ? "no" : "yes",
+                                },
+                                {
+                                    $inc: { qty: matchedQty },
+                                    $setOnInsert: { lockedQty: 0 },
+                                },
+                                { upsert: true, session },
+                            );
+
+                            await Market.updateOne(
+                                { _id: marketId },
+                                { $inc: { totalIssued: matchedQty } },
+                                { session },
+                            );
+
+                            await Log.create(
+                                [
+                                    {
+                                        userId: newOrder.userId,
+                                        marketId,
+                                        orderId: newOrder._id,
+                                        fillId: fill._id,
+                                        outcome: side,
+                                        action: "buy",
+                                        qtyChange: matchedQty,
+                                        lockedQtyChange: 0,
+                                        balanceUSDChange: incomingRefund,
+                                        lockedUSDChange: -incomingLockedAmt,
+                                    },
+                                    {
+                                        userId: maker.userId,
+                                        marketId,
+                                        orderId: maker._id,
+                                        fillId: fill._id,
+                                        outcome: side == "yes" ? "no" : "yes",
+                                        action: "buy",
+                                        qtyChange: matchedQty,
+                                        lockedQtyChange: 0,
+                                        balanceUSDChange: 0,
+                                        lockedUSDChange: -existingLockedAmt,
+                                    },
+                                ],
+                                { session },
+                            );
+                        } else {
+                            // TRANSFER: one buyer and one seller trade existing contracts.
+                            const buyer = type === "buy" ? newOrder : maker;
+                            const seller = type === "sell" ? newOrder : maker;
+                            const reserved = buyer.price * matchedQty;
+                            const cost = maker.price * matchedQty; // resting maker sets price
+                            const refund = reserved - cost;
+                            if (refund < 0) throw new Error("INVALID_PRICE");
+
+                            const buyerPaid = await User.updateOne(
+                                {
+                                    _id: buyer.userId,
+                                    lockedUSD: { $gte: reserved },
+                                },
+                                {
+                                    $inc: {
+                                        lockedUSD: -reserved,
+                                        availableUSD: refund,
+                                    },
+                                },
+                                { session },
+                            );
+                            const sellerPaid = await User.updateOne(
+                                { _id: seller.userId },
+                                { $inc: { availableUSD: cost } },
+                                { session },
+                            );
+                            if (
+                                buyerPaid.matchedCount !== 1 ||
+                                sellerPaid.matchedCount !== 1
+                            ) {
+                                throw new Error("inconsistent balance");
+                            }
+
+                            const sellerStock = await Stock.updateOne(
+                                {
+                                    userId: seller.userId,
+                                    marketId,
+                                    outcome: side,
+                                    lockedQty: { $gte: matchedQty },
+                                    qty: { $gte: matchedQty },
+                                },
+                                {
+                                    $inc: {
+                                        qty: -matchedQty,
+                                        lockedQty: -matchedQty,
+                                    },
+                                },
+                                { session },
+                            );
+                            if (sellerStock.matchedCount !== 1) {
+                                throw new Error("inconsistent stock");
+                            }
+
+                            await Stock.updateOne(
+                                {
+                                    userId: buyer.userId,
+                                    marketId,
+                                    outcome: side,
+                                },
+                                {
+                                    $inc: { qty: matchedQty },
+                                    $setOnInsert: { lockedQty: 0 },
+                                },
+                                { upsert: true, session },
+                            );
+
+                            await Log.create(
+                                [
+                                    {
+                                        userId: buyer.userId,
+                                        marketId,
+                                        orderId: buyer._id,
+                                        fillId: fill._id,
+                                        outcome: side,
+                                        action: "buy",
+                                        qtyChange: matchedQty,
+                                        lockedQtyChange: 0,
+                                        balanceUSDChange: refund,
+                                        lockedUSDChange: -reserved,
+                                    },
+                                    {
+                                        userId: seller.userId,
+                                        marketId,
+                                        orderId: seller._id,
+                                        fillId: fill._id,
+                                        outcome: side,
+                                        action: "sell",
+                                        qtyChange: -matchedQty,
+                                        lockedQtyChange: -matchedQty,
+                                        balanceUSDChange: cost,
+                                        lockedUSDChange: 0,
+                                    },
+                                ],
+                                { session },
+                            );
+                        }
+                        maker.remainingQuantity -= matchedQty;
+                        maker.status =
+                            maker.remainingQuantity === 0
+                                ? "filled"
+                                : "partial";
+                        await maker.save({ session });
+
+                        newOrder.remainingQuantity -= matchedQty;
+                    }
+                    newOrder.status =
+                        newOrder.remainingQuantity === 0
+                            ? "filled"
+                            : newOrder.remainingQuantity === quantity
+                              ? "open"
+                              : "partial";
+                    await newOrder.save({ session });
+
+                    return {
+                        orderId: newOrder._id,
+                        marketId,
+                        type,
+                        side,
+                        price,
+                        requestedQty: quantity,
+                        filledQty: quantity - newOrder.remainingQuantity,
+                        remainingQty: newOrder.remainingQuantity,
+                        status: newOrder.status,
+                    };
                 },
             );
             return res.status(200).json({
@@ -273,6 +524,62 @@ export const orderController = {
                 result: result,
             });
         } catch (error) {
+            if (error instanceof Error) {
+                if (error.message === "market not found") {
+                    return sendResponse(res, 404, "market not found");
+                }
+
+                if (error.message === "market already resolved") {
+                    return sendResponse(res, 404, "market already resolved");
+                }
+
+                if (error.message === "market already expired") {
+                    return sendResponse(res, 404, "market already expired");
+                }
+
+                if (
+                    error.message ===
+                    "creator cannot bet against there own market"
+                ) {
+                    return sendResponse(
+                        res,
+                        404,
+                        "creator cannot bet against there own market",
+                    );
+                }
+
+                if (error.message === "market closed") {
+                    return sendResponse(res, 403, "market closed");
+                }
+
+                if (error.message === "user not found") {
+                    return sendResponse(res, 404, "user not found");
+                }
+
+                if (error.message === "orderbook not found") {
+                    return sendResponse(res, 404, "orderbook not found");
+                }
+
+                if (error.message === "orderbook not found") {
+                    return sendResponse(res, 404, "orderbook not found");
+                }
+
+                if (error.message === "inconsistent balance") {
+                    return sendResponse(res, 400, "inconsistent balance");
+                }
+
+                if (error.message === "insufficient balance") {
+                    return sendResponse(res, 400, "insufficient balance");
+                }
+
+                if (error.message === "inconsistent stocks") {
+                    return sendResponse(res, 400, "inconsistent stock");
+                }
+
+                if (error.message === "insufficient stocks") {
+                    return sendResponse(res, 400, "insufficient stock");
+                }
+            }
             console.log("error while placing order : ", error);
             return sendResponse(res, 500, "failed to place order");
         }

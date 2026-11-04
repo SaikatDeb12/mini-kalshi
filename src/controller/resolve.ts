@@ -1,10 +1,8 @@
 import type { Request, Response } from "express";
 import { resolveMarketSchema } from "../types/resolve";
-import { Bet } from "../model/bet";
 import { User } from "../model/user";
-import { Wallet } from "../model/walletEvent";
 import { Market } from "../model/market";
-import { sndResponse } from "../utils/response";
+import { sendResponse } from "../utils/response";
 
 export async function resolveMarket(req: Request, res: Response) {
     try {
@@ -97,6 +95,6 @@ export async function resolveMarket(req: Request, res: Response) {
         });
     } catch (error) {
         console.log("error resolving the market : ", error);
-        return sndResponse(res, 500, "failed to resolve the market");
+        return sendResponse(res, 500, "failed to resolve the market");
     }
 }

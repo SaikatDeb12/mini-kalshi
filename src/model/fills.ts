@@ -24,6 +24,10 @@ const fillsModel = new Schema(
             type: Schema.Types.ObjectId,
             ref: "Market",
         },
+        matchType: {
+            type: String,
+            enum: ["transfer", "mint"],
+        },
         qty: {
             type: Number,
             required: true,
