@@ -127,7 +127,7 @@ export const authController = {
                 balance: user.availableUSD,
             });
         } catch (error) {
-            console.log("error which onramp: ", error);
+            console.log("error during onramp: ", error);
             return sendResponse(res, 500, "failed to update the balance");
         }
     },
@@ -169,8 +169,8 @@ export const authController = {
                 return sendResponse(res, 404, "user not found");
             }
 
-            const page = Number(req.query.page) ?? 1;
-            const limit = Number(req.query.limit) ?? 10;
+            const page = Number(req.query.page ?? 1);
+            const limit = Number(req.query.limit ?? 10);
 
             if (!Number.isSafeInteger(page) || !Number.isSafeInteger(limit)) {
                 return sendResponse(res, 400, "invalid pagination");

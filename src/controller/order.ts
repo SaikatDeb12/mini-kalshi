@@ -223,6 +223,7 @@ export const orderController = {
                             });
                         }
 
+                        // order in which we try to sort(custom comparator)
                         // 1) lowerst price
                         // 2) oldest order first
                         // 3) compare ids
@@ -257,7 +258,9 @@ export const orderController = {
                         }
                     }
 
-                    // from here settle makers logic :
+                    // here we try to find potential matches, then execute/swap the orders
+                    // existing order(Maker) -> somebody who already want to buy/sell
+                    // incoming order(Taker) -> somebody with opposite
                     for (const order of eligibleOrders) {
                         if (newOrder.remainingQuantity == 0) break;
                         const maker = order.maker;
@@ -288,7 +291,13 @@ export const orderController = {
                         );
 
                         if (order.kind == "mint") {
-                            // both side buy 'yes' and buy 'no' case
+                            // MINT : Here both users are buyers(Takers) with opposite side/outcome
+                            // both side either buy 'yes' or buy 'no'
+                            // Eg : User A -> buy NO at 45
+                            //      User B -> buy YES at 60
+                            //      Qty -> 10
+                            //      limit price : 105
+                            //      then, complete 10 YES,NO at 100 cents each
                             const incomingLockedAmt =
                                 newOrder.price * matchedQty;
                             const buyerExecutionPrice = 100 - maker.price;
@@ -312,7 +321,6 @@ export const orderController = {
                                 { session },
                             );
 
-                            // makers : whose orders are already in the orderbook
                             const makerResult = await User.updateOne(
                                 {
                                     _id: maker.userId,
@@ -393,7 +401,8 @@ export const orderController = {
                                 { session },
                             );
                         } else {
-                            // TRANSFER: one buyer and one seller trade existing contracts.
+                            // TRANSFER: one buyer and one seller trade existing contracts
+                            // Maker does not always mean 'seller', and taker does not always mean 'buyer'
                             const buyer = type === "buy" ? newOrder : maker;
                             const seller = type === "sell" ? newOrder : maker;
                             const reserved = buyer.price * matchedQty;
