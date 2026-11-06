@@ -11,7 +11,6 @@ app.use(express.json());
 app.use("/api/v1/auth", authRouter);
 app.use("/api/v1/", marketRouter);
 app.use("/api/v1/", orderRouter);
-// app.use("/api/v1/", resolveRouter);
 
 export const JWTSecretKey = process.env.SECRET_KEY as string;
 const mongodbUri = process.env.MONGODB_URI as string;

@@ -27,10 +27,14 @@ export const orderController = {
                 return sendResponse(res, 401, "invalid token");
             }
 
-            const { marketString } = req.params;
-            const marketIdParam = Array.isArray(marketString)
-                ? marketString[0]
-                : marketString;
+            const { marketIdParam } = req.params;
+            const marketId = Array.isArray(marketIdParam)
+                ? marketIdParam[0]
+                : marketIdParam;
+
+            if (!marketId || !mongoose.isValidObjectId(marketId)) {
+                return sendResponse(res, 400, "invalid market Id");
+            }
 
             const body = req.body;
             const { success, error, data } = createOrderSchema.safeParse(body);
@@ -66,7 +70,6 @@ export const orderController = {
                             "creator cannot bet against there own market",
                         );
                     }
-                    const marketId = market._id;
                     const gate = await Market.updateOne(
                         {
                             _id: marketId,
@@ -231,7 +234,7 @@ export const orderController = {
                             (a, b) =>
                                 a.effectivePrice - b.effectivePrice ||
                                 new Date(a.maker.createdAt).getTime() -
-                                    new Date(b.maker.createdAt).getTime() ||
+                                new Date(b.maker.createdAt).getTime() ||
                                 String(a.maker._id).localeCompare(
                                     String(b.maker._id),
                                 ),
@@ -511,8 +514,8 @@ export const orderController = {
                         newOrder.remainingQuantity === 0
                             ? "filled"
                             : newOrder.remainingQuantity === quantity
-                              ? "open"
-                              : "partial";
+                                ? "open"
+                                : "partial";
                     await newOrder.save({ session });
 
                     return {

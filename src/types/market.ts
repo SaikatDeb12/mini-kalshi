@@ -12,3 +12,7 @@ export const createOrderSchema = z.object({
     price: z.number().int().min(1).max(99),
     quantity: z.number().int().min(0),
 });
+
+export const createSplitSchema = z.object({
+    quantity: z.number().int().positive(),
+});

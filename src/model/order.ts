@@ -19,6 +19,8 @@ const orderSchema = new Schema(
         price: {
             type: Number,
             required: true,
+            min: 1,
+            max: 99,
         },
         quantity: {
             type: Number,
@@ -38,5 +40,13 @@ const orderSchema = new Schema(
     },
     { timestamps: true },
 );
+
+orderSchema.index({
+    orderbookId: 1,
+    type: 1,
+    status: 1,
+    price: 1,
+    createdAt: 1,
+});
 
 export const Order = mongoose.model("Order", orderSchema);

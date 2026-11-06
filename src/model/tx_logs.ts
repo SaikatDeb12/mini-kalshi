@@ -33,6 +33,7 @@ const txLogsSchema = new Schema(
                 "lock",
                 "unlock",
                 "split",
+                "merge",
                 "refund",
                 "cancel",
             ],
@@ -40,15 +41,19 @@ const txLogsSchema = new Schema(
         },
         qtyChange: {
             type: Number,
+            default: 0,
         },
         lockedQtyChange: {
             type: Number,
+            default: 0,
         },
         balanceUSDChange: {
             type: Number,
+            default: 0,
         },
         lockedUSDChange: {
             type: Number,
+            default: 0,
         },
     },
     { timestamps: true },

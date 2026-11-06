@@ -1,6 +1,6 @@
 import mongoose, { Schema } from "mongoose";
 
-const fillsModel = new Schema(
+const fillSchema = new Schema(
     {
         makerOrderId: {
             type: Schema.Types.ObjectId,
@@ -23,10 +23,12 @@ const fillsModel = new Schema(
         marketId: {
             type: Schema.Types.ObjectId,
             ref: "Market",
+            required: true,
         },
         matchType: {
             type: String,
             enum: ["transfer", "mint"],
+            required: true,
         },
         qty: {
             type: Number,
@@ -36,4 +38,4 @@ const fillsModel = new Schema(
     { timestamps: true },
 );
 
-export const Fill = mongoose.model("Fill", fillsModel);
+export const Fill = mongoose.model("Fill", fillSchema);
