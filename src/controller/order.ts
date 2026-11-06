@@ -115,6 +115,7 @@ export const orderController = {
 
                     if (type == "buy") {
                         // here reserve for buy
+                        console.log("buy started");
                         const locked = await User.findOneAndUpdate(
                             {
                                 _id: user._id,
@@ -126,11 +127,12 @@ export const orderController = {
                                     lockedUSD: totalAmount,
                                 },
                             },
-                            { returnDocument: "after", session: session },
+                            { returnDocument: "after", session },
                         );
                         if (!locked) {
                             throw new Error("insufficient balance");
                         }
+                        console.log("BUY reservation completed", locked?._id);
                     } else {
                         // here we reserve for sell
                         const locked = await Stock.findOneAndUpdate(
@@ -146,13 +148,14 @@ export const orderController = {
                                 },
                             },
                             { $inc: { lockedQty: quantity } },
-                            { returnDocument: "after", session: session },
+                            { returnDocument: "after", session },
                         );
-                        if (locked?.matchedCount != 1) {
+                        if (!locked) {
                             throw new Error("insufficient stocks");
                         }
                     }
 
+                    console.log("before newOrder");
                     const [newOrder] = await Order.create(
                         [
                             {
@@ -169,17 +172,25 @@ export const orderController = {
                     );
 
                     // write in Log table
-                    await Log.create({
-                        userId: req.userId,
-                        marketId: market._id,
-                        orderId: newOrder._id,
-                        outcome: side,
-                        action: "lock",
-                        qtyChange: 0,
-                        lockedQtyChange: type == "sell" ? quantity : 0,
-                        lockedUSDChange: type == "buy" ? totalAmount : 0,
-                        balanceUSDChange: type == "buy" ? totalAmount * -1 : 0,
-                    });
+                    console.log("after newORder in log");
+                    await Log.create(
+                        [
+                            {
+                                userId: req.userId,
+                                marketId: market._id,
+                                orderId: newOrder._id,
+                                outcome: side,
+                                action: "lock",
+                                qtyChange: 0,
+                                lockedQtyChange: type == "sell" ? quantity : 0,
+                                lockedUSDChange:
+                                    type == "buy" ? totalAmount : 0,
+                                balanceUSDChange:
+                                    type == "buy" ? totalAmount * -1 : 0,
+                            },
+                        ],
+                        { session },
+                    );
 
                     // matching similar order/candidate and storing it in the eligibleOrders
                     const eligibleOrders: {
@@ -188,6 +199,7 @@ export const orderController = {
                         effectivePrice: number;
                     }[] = [];
 
+                    console.log("after creating eligibleorder[]");
                     if (type == "buy") {
                         // type 'buy' then i want to 'sell'
                         const asks = await Order.find({
@@ -239,7 +251,9 @@ export const orderController = {
                                     String(b.maker._id),
                                 ),
                         );
+                        console.log("end of creating eligibleorder[]");
                     } else {
+                        console.log("else part of creating eligibleorder[]");
                         // sell yes matches buy yes
                         const bids = await Order.find({
                             orderbookId: sameSideOrderbook._id,
@@ -259,13 +273,19 @@ export const orderController = {
                                 effectivePrice: bid.price,
                             });
                         }
+                        console.log(
+                            "else part end of creating eligibleorder[]",
+                        );
                     }
 
                     // here we try to find potential matches, then execute/swap the orders
                     // existing order(Maker) -> somebody who already want to buy/sell
                     // incoming order(Taker) -> somebody with opposite
+                    console.log("start of for loop of order");
                     for (const order of eligibleOrders) {
+                        console.log("*");
                         if (newOrder.remainingQuantity == 0) break;
+                        console.log("**");
                         const maker = order.maker;
                         const matchedQty = Math.min(
                             newOrder.remainingQuantity,
@@ -276,11 +296,13 @@ export const orderController = {
                         }
 
                         const executionPrice = order.effectivePrice;
+                        console.log("start of create fill");
                         const [fill] = await Fill.create(
                             [
                                 {
                                     makerOrderId: maker._id,
                                     takerOrderId: newOrder._id,
+                                    marketId: market._id,
                                     matchType: order.kind,
                                     makerPrice: maker.price,
                                     takerPrice:
@@ -290,8 +312,9 @@ export const orderController = {
                                     qty: matchedQty,
                                 },
                             ],
-                            { session },
+                            { ordered: true, session },
                         );
+                        console.log("end of create fill");
 
                         if (order.kind == "mint") {
                             // MINT : Here both users are buyers(Takers) with opposite side/outcome
@@ -310,6 +333,7 @@ export const orderController = {
                             const existingLockedAmt = maker.price * matchedQty;
 
                             // buyers : wants to buy 'yes' or 'no'
+                            console.log("buyer update start");
                             const buyerUpdateResult = await User.updateOne(
                                 {
                                     _id: newOrder.userId,
@@ -323,7 +347,9 @@ export const orderController = {
                                 },
                                 { session },
                             );
+                            console.log("buyer update end");
 
+                            console.log("maker result start");
                             const makerResult = await User.updateOne(
                                 {
                                     _id: maker.userId,
@@ -334,6 +360,7 @@ export const orderController = {
                                 },
                                 { session },
                             );
+                            console.log("maker result end");
 
                             if (
                                 buyerUpdateResult.matchedCount != 1 ||
@@ -401,7 +428,7 @@ export const orderController = {
                                         lockedUSDChange: -existingLockedAmt,
                                     },
                                 ],
-                                { session },
+                                { ordered: true, session },
                             );
                         } else {
                             // TRANSFER: one buyer and one seller trade existing contracts
@@ -498,7 +525,7 @@ export const orderController = {
                                         lockedUSDChange: 0,
                                     },
                                 ],
-                                { session },
+                                { ordered: true, session },
                             );
                         }
                         maker.remainingQuantity -= matchedQty;
@@ -510,12 +537,14 @@ export const orderController = {
 
                         newOrder.remainingQuantity -= matchedQty;
                     }
+                    console.log("end of for loop of order");
                     newOrder.status =
                         newOrder.remainingQuantity === 0
                             ? "filled"
                             : newOrder.remainingQuantity === quantity
                                 ? "open"
                                 : "partial";
+                    console.log("saving new order");
                     await newOrder.save({ session });
 
                     return {
@@ -531,6 +560,7 @@ export const orderController = {
                     };
                 },
             );
+            console.log("done with the transaction");
             return res.status(200).json({
                 message: "order placed successfully",
                 result: result,

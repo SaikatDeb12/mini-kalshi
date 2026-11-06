@@ -121,8 +121,13 @@ export const marketController = {
     splitMarket: async (req: Request, res: Response) => {
         try {
             const userId = req.userId;
-            if (!userId) {
+            if (!userId || !mongoose.isValidObjectId(userId)) {
                 return sendResponse(res, 401, "invalid token");
+            }
+
+            const user = await User.findById(userId);
+            if (!user) {
+                throw new Error("user not found");
             }
 
             const { marketIdParam } = req.params;
@@ -205,7 +210,7 @@ export const marketController = {
                         },
                         {
                             returnDocument: "after",
-                            session: session,
+                            session,
                         },
                     );
 
@@ -214,7 +219,7 @@ export const marketController = {
                     }
 
                     // now to create and update the stocks for Yes
-                    const yesStocks = await Stock.updateOne(
+                    await Stock.updateOne(
                         {
                             userId: userId,
                             marketId: marketId,
@@ -223,19 +228,19 @@ export const marketController = {
                         {
                             $inc: { qty: quantity },
                         },
-                        { upsert: true, session: session },
+                        { upsert: true, session },
                     );
 
-                    const noStocks = await Stock.updateOne(
+                    await Stock.updateOne(
                         {
                             userId: userId,
-                            markeId: marketId,
+                            marketId: marketId,
                             outcome: "no",
                         },
                         {
                             $inc: { qty: quantity },
                         },
-                        { upsert: true, session: session },
+                        { upsert: true, session },
                     );
 
                     // create log :
@@ -258,12 +263,13 @@ export const marketController = {
                                 action: "split",
                                 qtyChange: quantity,
                                 lockedQtyChange: 0,
-                                balanceUSDChange: -totalAmount,
+                                balanceUSDChange: 0,
                                 lockedUSDChange: 0,
                             },
                         ],
-                        { session },
+                        { ordered: true, session },
                     );
+
                     return {
                         marketId: marketId,
                         pairsCreated: quantity,
@@ -304,12 +310,12 @@ export const marketController = {
                     );
                 }
 
-                if (error.message === "insufficient balance") {
-                    return sendResponse(res, 400, "insufficient balance");
-                }
-
                 if (error.message === "market closed") {
                     return sendResponse(res, 403, "market closed");
+                }
+
+                if (error.message === "insufficient balance") {
+                    return sendResponse(res, 400, "insufficient balance");
                 }
 
                 if (error.message === "user not found") {
