@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import { createMarketSchema, createSplitSchema } from "../types/market";
+import {
+    createMarketSchema,
+    createSplitSchema,
+    mergeMarketSchema,
+    resolveMarketSchema,
+} from "../types/market";
 import { Market } from "../model/market";
 import { sendResponse } from "../utils/response";
 import { User } from "../model/user";
@@ -7,6 +12,7 @@ import { Orderbook } from "../model/orderbook";
 import mongoose from "mongoose";
 import { Stock } from "../model/stock_balance";
 import { Log } from "../model/tx_logs";
+import { Order } from "../model/order";
 
 export const marketController = {
     createMarket: async (req: Request, res: Response) => {
@@ -326,4 +332,554 @@ export const marketController = {
             return sendResponse(res, 500, "failed to split market");
         }
     },
+
+    mergeMarket: async (req: Request, res: Response) => {
+        try {
+            const userId = req.userId;
+
+            if (!userId || !mongoose.isValidObjectId(userId)) {
+                return sendResponse(res, 401, "invalid token");
+            }
+
+            const param = req.params.marketIdParam;
+            const marketId = Array.isArray(param) ? param[0] : param;
+
+            if (!marketId || !mongoose.isValidObjectId(marketId)) {
+                return sendResponse(res, 400, "invalid market ID");
+            }
+
+            const parsed = mergeMarketSchema.safeParse(req.body);
+
+            if (!parsed.success) {
+                return res.status(400).json({
+                    message: "invalid request body",
+                    error: parsed.error.issues[0]?.message,
+                });
+            }
+
+            const { quantity } = parsed.data;
+            const totalAmount = quantity * 100;
+
+            if (!Number.isSafeInteger(totalAmount)) {
+                return sendResponse(res, 400, "invalid merge amount");
+            }
+
+            const result = await mongoose.connection.transaction(
+                async (session) => {
+                    const market =
+                        await Market.findById(marketId).session(session);
+
+                    if (!market) {
+                        throw new Error("market not found");
+                    }
+
+                    if (market.resolution !== null) {
+                        throw new Error("market already resolved");
+                    }
+
+                    // Coordinate MERGE with matching, SPLIT, and RESOLVE.
+                    const gate = await Market.updateOne(
+                        {
+                            _id: marketId,
+                            resolution: null,
+                            totalIssued: { $gte: quantity },
+                        },
+                        {
+                            $inc: {
+                                totalIssued: -quantity,
+                                matchingVersion: 1,
+                            },
+                        },
+                        { session },
+                    );
+
+                    if (gate.matchedCount !== 1) {
+                        throw new Error("market cannot be merged");
+                    }
+
+                    // Only unlocked contracts can be burned.
+                    for (const outcome of ["yes", "no"] as const) {
+                        const stock = await Stock.updateOne(
+                            {
+                                userId,
+                                marketId,
+                                outcome,
+                                $expr: {
+                                    $gte: [
+                                        {
+                                            $subtract: ["$qty", "$lockedQty"],
+                                        },
+                                        quantity,
+                                    ],
+                                },
+                            },
+                            {
+                                $inc: { qty: -quantity },
+                            },
+                            { session },
+                        );
+
+                        if (stock.matchedCount !== 1) {
+                            throw new Error("insufficient unlocked contracts");
+                        }
+                    }
+
+                    // Return collateral to the user's wallet.
+                    const updatedUser = await User.findByIdAndUpdate(
+                        userId,
+                        {
+                            $inc: {
+                                availableUSD: totalAmount,
+                            },
+                        },
+                        {
+                            returnDocument: "after",
+                            session,
+                        },
+                    );
+
+                    if (!updatedUser) {
+                        throw new Error("user not found");
+                    }
+
+                    // Log both stock burns, but USD refund only once.
+                    await Log.create(
+                        [
+                            {
+                                userId,
+                                marketId,
+                                outcome: "yes",
+                                action: "merge",
+                                qtyChange: -quantity,
+                                lockedQtyChange: 0,
+                                balanceUSDChange: totalAmount,
+                                lockedUSDChange: 0,
+                            },
+                            {
+                                userId,
+                                marketId,
+                                outcome: "no",
+                                action: "merge",
+                                qtyChange: -quantity,
+                                lockedQtyChange: 0,
+                                balanceUSDChange: 0,
+                                lockedUSDChange: 0,
+                            },
+                        ],
+                        { session },
+                    );
+
+                    return {
+                        marketId,
+                        pairsMerged: quantity,
+                        yesBurned: quantity,
+                        noBurned: quantity,
+                        amountReturned: totalAmount,
+                        availableUSD: updatedUser.availableUSD,
+                        totalIssued: market.totalIssued - quantity,
+                    };
+                },
+            );
+
+            return res.status(200).json({
+                message: "market merge successful",
+                result,
+            });
+        } catch (error) {
+            if (error instanceof Error) {
+                if (error.message == "market not found") {
+                    sendResponse(res, 404, "market not found");
+                }
+                if (error.message == "market already resolved") {
+                    sendResponse(res, 400, "market already resolved");
+                }
+                if (error.message == "market cannot be merged") {
+                    sendResponse(res, 400, "market cannot be merged");
+                }
+                if (error.message == "insufficient unlocked contracts") {
+                    sendResponse(res, 400, "insufficient unlocked contracts");
+                }
+                if (error.message == "user not found") {
+                    sendResponse(res, 404, "user not found");
+                }
+            }
+
+            console.error("error while merging market:", error);
+            return sendResponse(res, 500, "failed to merge market");
+        }
+    },
+
+    resolveMarket: async (req: Request, res: Response) => {
+        try {
+            const userId = req.userId;
+
+            if (!userId || !mongoose.isValidObjectId(userId)) {
+                return sendResponse(res, 401, "invalid token");
+            }
+
+            const param = req.params.marketIdParam;
+            const marketId = Array.isArray(param) ? param[0] : param;
+
+            if (!marketId || !mongoose.isValidObjectId(marketId)) {
+                return sendResponse(res, 400, "invalid market ID");
+            }
+
+            const parsed = resolveMarketSchema.safeParse(req.body);
+
+            if (!parsed.success) {
+                return res.status(400).json({
+                    message: "invalid request body",
+                    error: parsed.error.issues[0]?.message,
+                });
+            }
+
+            const { outcome } = parsed.data;
+
+            const result = await mongoose.connection.transaction(
+                async (session) => {
+                    // 1. Validate admin against the database.
+                    const admin = await User.findById(userId).session(session);
+
+                    if (!admin || admin.role !== "admin") {
+                        throw new Error("admin access required");
+                    }
+
+                    // 2. Validate market and ownership.
+                    const market =
+                        await Market.findById(marketId).session(session);
+
+                    if (!market) {
+                        throw new Error("market not found");
+                    }
+
+                    if (market.creatorId.toString() !== userId.toString()) {
+                        throw new Error(
+                            "only the market creator can resolve this market",
+                        );
+                    }
+
+                    if (market.resolution !== null) {
+                        throw new Error("market already resolved");
+                    }
+
+                    const now = new Date();
+
+                    if (market.expiry > now) {
+                        throw new Error("market has not expired yet");
+                    }
+
+                    const issuedPairs = market.totalIssued;
+                    const expectedPayout = issuedPairs * 100;
+
+                    if (
+                        !Number.isSafeInteger(issuedPairs) ||
+                        issuedPairs < 0 ||
+                        !Number.isSafeInteger(expectedPayout)
+                    ) {
+                        throw new Error("invalid market issuance");
+                    }
+
+                    // 3. Close the market inside the transaction.
+                    // This coordinates with placeOrder, SPLIT, and MERGE.
+                    const gate = await Market.updateOne(
+                        {
+                            _id: marketId,
+                            creatorId: admin._id,
+                            resolution: null,
+                            expiry: { $lte: now },
+                        },
+                        {
+                            $set: {
+                                resolution: outcome,
+                                totalIssued: 0,
+                            },
+                            $inc: { matchingVersion: 1 },
+                        },
+                        { session },
+                    );
+
+                    if (gate.matchedCount !== 1) {
+                        throw new Error("market cannot be resolved");
+                    }
+
+                    // 4. Fetch this market's YES and NO orderbooks.
+                    const books = await Orderbook.find({
+                        marketId,
+                    }).session(session);
+
+                    const yesBook = books.find(
+                        (book) => book.outcome === "yes",
+                    );
+                    const noBook = books.find((book) => book.outcome === "no");
+
+                    if (!yesBook || !noBook || books.length !== 2) {
+                        throw new Error("inconsistent orderbooks");
+                    }
+
+                    const bookOutcomes = new Map<string, "yes" | "no">([
+                        [yesBook._id.toString(), "yes"],
+                        [noBook._id.toString(), "no"],
+                    ]);
+
+                    // 5. Cancel outstanding orders before settlement.
+                    const openOrders = await Order.find({
+                        orderbookId: {
+                            $in: [yesBook._id, noBook._id],
+                        },
+                        status: { $in: ["open", "partial"] },
+                    }).session(session);
+
+                    for (const order of openOrders) {
+                        const remaining = order.remainingQuantity;
+                        const orderOutcome = bookOutcomes.get(
+                            order.orderbookId.toString(),
+                        );
+
+                        if (
+                            !orderOutcome ||
+                            !Number.isSafeInteger(remaining) ||
+                            remaining <= 0
+                        ) {
+                            throw new Error("inconsistent open order");
+                        }
+
+                        let balanceUSDChange = 0;
+                        let lockedUSDChange = 0;
+                        let lockedQtyChange = 0;
+
+                        if (order.type === "buy") {
+                            // Return unused USD reserved for this BUY.
+                            const refund = order.price * remaining;
+
+                            if (!Number.isSafeInteger(refund)) {
+                                throw new Error("invalid order refund");
+                            }
+
+                            const update = await User.updateOne(
+                                {
+                                    _id: order.userId,
+                                    lockedUSD: { $gte: refund },
+                                },
+                                {
+                                    $inc: {
+                                        availableUSD: refund,
+                                        lockedUSD: -refund,
+                                    },
+                                },
+                                { session },
+                            );
+
+                            if (update.matchedCount !== 1) {
+                                throw new Error("inconsistent locked USD");
+                            }
+
+                            balanceUSDChange = refund;
+                            lockedUSDChange = -refund;
+                        } else if (order.type === "sell") {
+                            // Unlock contracts reserved for this SELL.
+                            const update = await Stock.updateOne(
+                                {
+                                    userId: order.userId,
+                                    marketId,
+                                    outcome: orderOutcome,
+                                    qty: { $gte: remaining },
+                                    lockedQty: { $gte: remaining },
+                                },
+                                {
+                                    $inc: {
+                                        lockedQty: -remaining,
+                                    },
+                                },
+                                { session },
+                            );
+
+                            if (update.matchedCount !== 1) {
+                                throw new Error("inconsistent locked stocks");
+                            }
+
+                            lockedQtyChange = -remaining;
+                        } else {
+                            throw new Error("invalid order type");
+                        }
+
+                        order.status = "cancelled";
+                        // Keep remainingQuantity as the unfilled quantity.
+                        await order.save({ session });
+
+                        await Log.create(
+                            [
+                                {
+                                    userId: order.userId,
+                                    marketId,
+                                    orderId: order._id,
+                                    outcome: orderOutcome,
+                                    action: "cancel",
+                                    qtyChange: 0,
+                                    lockedQtyChange,
+                                    balanceUSDChange,
+                                    lockedUSDChange,
+                                },
+                            ],
+                            { session },
+                        );
+                    }
+
+                    // 6. Read holders after all SELL locks are released.
+                    const stocks = await Stock.find({
+                        marketId,
+                    }).session(session);
+
+                    let totalYes = 0;
+                    let totalNo = 0;
+
+                    for (const stock of stocks) {
+                        if (
+                            !Number.isSafeInteger(stock.qty) ||
+                            !Number.isSafeInteger(stock.lockedQty) ||
+                            stock.qty < 0 ||
+                            stock.lockedQty !== 0
+                        ) {
+                            throw new Error("inconsistent stock balances");
+                        }
+
+                        if (stock.outcome === "yes") {
+                            totalYes += stock.qty;
+                        } else if (stock.outcome === "no") {
+                            totalNo += stock.qty;
+                        } else {
+                            throw new Error("invalid stock outcome");
+                        }
+                    }
+
+                    // Every issued pair must have one YES and one NO.
+                    if (totalYes !== issuedPairs || totalNo !== issuedPairs) {
+                        throw new Error(
+                            "stock supply does not match totalIssued",
+                        );
+                    }
+
+                    // 7. Pay winners and burn all outstanding stocks.
+                    let totalPaid = 0;
+                    let winningContracts = 0;
+
+                    for (const stock of stocks) {
+                        if (stock.qty === 0) continue;
+
+                        const payout =
+                            stock.outcome === outcome ? stock.qty * 100 : 0;
+
+                        if (!Number.isSafeInteger(payout)) {
+                            throw new Error("invalid settlement payout");
+                        }
+
+                        if (payout > 0) {
+                            const credit = await User.updateOne(
+                                { _id: stock.userId },
+                                {
+                                    $inc: {
+                                        availableUSD: payout,
+                                    },
+                                },
+                                { session },
+                            );
+
+                            if (credit.matchedCount !== 1) {
+                                throw new Error("settlement user not found");
+                            }
+
+                            winningContracts += stock.qty;
+                            totalPaid += payout;
+                        }
+
+                        const burned = await Stock.updateOne(
+                            {
+                                _id: stock._id,
+                                qty: stock.qty,
+                                lockedQty: 0,
+                            },
+                            {
+                                $set: {
+                                    qty: 0,
+                                },
+                            },
+                            { session },
+                        );
+
+                        if (burned.matchedCount !== 1) {
+                            throw new Error("failed to burn contracts");
+                        }
+
+                        await Log.create(
+                            [
+                                {
+                                    userId: stock.userId,
+                                    marketId,
+                                    outcome: stock.outcome,
+                                    action: "settle",
+                                    qtyChange: -stock.qty,
+                                    lockedQtyChange: 0,
+                                    balanceUSDChange: payout,
+                                    lockedUSDChange: 0,
+                                },
+                            ],
+                            { session },
+                        );
+                    }
+
+                    // 8. Collateral conservation check.
+                    if (
+                        winningContracts !== issuedPairs ||
+                        totalPaid !== expectedPayout
+                    ) {
+                        throw new Error("settlement collateral mismatch");
+                    }
+
+                    return {
+                        marketId,
+                        resolution: outcome,
+                        issuedPairsSettled: issuedPairs,
+                        winningContracts,
+                        totalPaid,
+                        cancelledOrders: openOrders.length,
+                        totalIssued: 0,
+                    };
+                },
+            );
+
+            return res.status(200).json({
+                message: "market resolved successfully",
+                result,
+            });
+        } catch (error) {
+            if (error instanceof Error) {
+                if (error.message == "admin access required") {
+                    sendResponse(res, 403, "admin access required");
+                }
+                if (error.message == "market not found") {
+                    sendResponse(res, 404, "market not found");
+                }
+                if (
+                    error.message ==
+                    "only the market creator can resolve this market"
+                ) {
+                    sendResponse(
+                        res,
+                        403,
+                        "only the market creator can resolve this market",
+                    );
+                }
+                if (error.message == "market already resolved") {
+                    sendResponse(res, 409, "market already resolved");
+                }
+                if (error.message == "market has not expired yet") {
+                    sendResponse(res, 400, "market has not expired yet");
+                }
+            }
+
+            console.error("error while resolving market:", error);
+            return sendResponse(res, 500, "failed to resolve market");
+        }
+    },
 };
+
+// TODO: getmarketdetails, getmarket orderbooks, get fills, cancel order, get my orders, all order details

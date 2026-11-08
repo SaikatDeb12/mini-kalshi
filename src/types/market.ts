@@ -1,7 +1,7 @@
 import * as z from "zod";
 
 export const createMarketSchema = z.object({
-    title: z.string().min(3).max(25),
+    title: z.string().min(3).max(50),
     // converting the date from string -> timestamp
     expiry: z.coerce.date(),
 });
@@ -15,4 +15,12 @@ export const createOrderSchema = z.object({
 
 export const createSplitSchema = z.object({
     quantity: z.number().int().positive(),
+});
+
+export const mergeMarketSchema = z.object({
+    quantity: z.number().int().positive(),
+});
+
+export const resolveMarketSchema = z.object({
+    outcome: z.enum(["yes", "no"]),
 });

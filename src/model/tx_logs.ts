@@ -36,6 +36,7 @@ const txLogsSchema = new Schema(
                 "merge",
                 "refund",
                 "cancel",
+                "settle",
             ],
             required: true,
         },

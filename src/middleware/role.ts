@@ -1,5 +1,5 @@
 import { type Request, type Response, type NextFunction } from "express";
-import { sndResponse } from "../utils/response";
+import { sendResponse } from "../utils/response";
 
 export async function roleMiddleware(
     req: Request,
@@ -8,7 +8,7 @@ export async function roleMiddleware(
 ) {
     const role = req.role;
     if (role != "admin") {
-        return sndResponse(res, 403, "admin access required");
+        return sendResponse(res, 403, "admin access required");
     }
     next();
 }

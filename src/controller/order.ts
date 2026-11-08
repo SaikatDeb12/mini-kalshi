@@ -242,7 +242,7 @@ export const orderController = {
                             (a, b) =>
                                 a.effectivePrice - b.effectivePrice ||
                                 new Date(a.maker.createdAt).getTime() -
-                                new Date(b.maker.createdAt).getTime() ||
+                                    new Date(b.maker.createdAt).getTime() ||
                                 String(a.maker._id).localeCompare(
                                     String(b.maker._id),
                                 ),
@@ -523,8 +523,8 @@ export const orderController = {
                         newOrder.remainingQuantity === 0
                             ? "filled"
                             : newOrder.remainingQuantity === quantity
-                                ? "open"
-                                : "partial";
+                              ? "open"
+                              : "partial";
                     await newOrder.save({ session });
 
                     return {
@@ -606,3 +606,5 @@ export const orderController = {
         }
     },
 };
+
+// TODO : cancel order(not to use delete, but with archived_At)
