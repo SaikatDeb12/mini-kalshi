@@ -35,38 +35,3 @@ export const marketSchema = new Schema(
     },
 );
 export const Market = mongoose.model("Market", marketSchema);
-
-// export const marketModel = new Schema(
-//     {
-//         title: {
-//             type: String,
-//             required: true,
-//         },
-//         initialWager: {
-//             type: Number,
-//             required: true,
-//         },
-//         side: {
-//             type: String,
-//             enum: ["yes", "no"],
-//             required: true,
-//         },
-//         creatorId: {
-//             type: mongoose.Schema.Types.ObjectId,
-//             ref: "User",
-//             required: true,
-//         },
-//         expiry: {
-//             type: Date,
-//             required: true,
-//         },
-//         resolution: {
-//             type: String,
-//             enum: ["yes", "no", null],
-//             default: null,
-//         },
-//     },
-//     {
-//         timestamps: true,
-//     },
-// );
