@@ -198,7 +198,7 @@ describe("Login User", () => {
         expect(data.message).toBe("invalid credentials");
     });
 
-    test("should reject nonexistent user", async () => {
+    test("should reject unregistered user", async () => {
         const { status, data } = await request(ROUTES.signin, "POST", {
             username: "missinguser123",
             password,
