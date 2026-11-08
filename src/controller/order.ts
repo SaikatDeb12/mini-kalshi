@@ -555,5 +555,3 @@ export const orderController = {
         }
     },
 };
-
-// TODO : cancel order(not to use delete, but with archived_At)
