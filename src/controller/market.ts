@@ -13,6 +13,7 @@ import mongoose from "mongoose";
 import { Stock } from "../model/stock_balance";
 import { Log } from "../model/tx_logs";
 import { Order } from "../model/order";
+import { AppError } from "../utils/AppError";
 
 export const marketController = {
     createMarket: async (req: Request, res: Response) => {
@@ -133,7 +134,7 @@ export const marketController = {
 
             const user = await User.findById(userId);
             if (!user) {
-                throw new Error("user not found");
+                throw new AppError(404, "user not found");
             }
 
             const { marketIdParam } = req.params;
@@ -168,19 +169,20 @@ export const marketController = {
                         await Market.findById(marketId).session(session);
 
                     if (!market) {
-                        throw new Error("market not found");
+                        throw new AppError(404, "market not found");
                     }
 
                     if (market.resolution == "yes") {
-                        throw new Error("market already resolved");
+                        throw new AppError(400, "market already resolved");
                     }
 
                     if (market.expiry <= new Date()) {
-                        throw new Error("market already expired");
+                        throw new AppError(400, "market already expired");
                     }
 
                     if (market.creatorId.toString() == req.userId) {
-                        throw new Error(
+                        throw new AppError(
+                            400,
                             "creator cannot bet against there own market",
                         );
                     }
@@ -201,7 +203,7 @@ export const marketController = {
                         { session },
                     );
                     if (marketUpdate.matchedCount != 1) {
-                        throw new Error("market closed");
+                        throw new AppError(400, "market closed");
                     }
 
                     const updatedUser = await User.findOneAndUpdate(
@@ -221,7 +223,7 @@ export const marketController = {
                     );
 
                     if (!updatedUser) {
-                        throw new Error("insufficient balance");
+                        throw new AppError(400, "insufficient balance");
                     }
 
                     // now to create and update the stocks for Yes
@@ -292,41 +294,8 @@ export const marketController = {
                 result,
             });
         } catch (error) {
-            if (error instanceof Error) {
-                if (error.message === "market not found") {
-                    return sendResponse(res, 404, "market not found");
-                }
-
-                if (error.message === "market already resolved") {
-                    return sendResponse(res, 404, "market already resolved");
-                }
-
-                if (error.message === "market already expired") {
-                    return sendResponse(res, 404, "market already expired");
-                }
-
-                if (
-                    error.message ===
-                    "creator cannot bet against there own market"
-                ) {
-                    return sendResponse(
-                        res,
-                        404,
-                        "creator cannot bet against there own market",
-                    );
-                }
-
-                if (error.message === "market closed") {
-                    return sendResponse(res, 403, "market closed");
-                }
-
-                if (error.message === "insufficient balance") {
-                    return sendResponse(res, 400, "insufficient balance");
-                }
-
-                if (error.message === "user not found") {
-                    return sendResponse(res, 404, "user not found");
-                }
+            if (error instanceof AppError) {
+                return sendResponse(res, error.statusCode, error.message);
             }
             console.log("error while splitting", error);
             return sendResponse(res, 500, "failed to split market");
@@ -420,7 +389,10 @@ export const marketController = {
                         );
 
                         if (stock.matchedCount !== 1) {
-                            throw new Error("insufficient unlocked contracts");
+                            throw new AppError(
+                                400,
+                                "insufficient unlocked contracts",
+                            );
                         }
                     }
 
@@ -486,22 +458,8 @@ export const marketController = {
                 result,
             });
         } catch (error) {
-            if (error instanceof Error) {
-                if (error.message == "market not found") {
-                    sendResponse(res, 404, "market not found");
-                }
-                if (error.message == "market already resolved") {
-                    sendResponse(res, 400, "market already resolved");
-                }
-                if (error.message == "market cannot be merged") {
-                    sendResponse(res, 400, "market cannot be merged");
-                }
-                if (error.message == "insufficient unlocked contracts") {
-                    sendResponse(res, 400, "insufficient unlocked contracts");
-                }
-                if (error.message == "user not found") {
-                    sendResponse(res, 404, "user not found");
-                }
+            if (error instanceof AppError) {
+                sendResponse(res, error.statusCode, error.message);
             }
 
             console.error("error while merging market:", error);
@@ -613,7 +571,7 @@ export const marketController = {
                     const noBook = books.find((book) => book.outcome === "no");
 
                     if (!yesBook || !noBook || books.length !== 2) {
-                        throw new Error("inconsistent orderbooks");
+                        throw new AppError(409, "inconsistent orderbooks");
                     }
 
                     const bookOutcomes = new Map<string, "yes" | "no">([
@@ -640,7 +598,7 @@ export const marketController = {
                             !Number.isSafeInteger(remaining) ||
                             remaining <= 0
                         ) {
-                            throw new Error("inconsistent open order");
+                            throw new AppError(409, "inconsistent open order");
                         }
 
                         let balanceUSDChange = 0;
@@ -652,7 +610,7 @@ export const marketController = {
                             const refund = order.price * remaining;
 
                             if (!Number.isSafeInteger(refund)) {
-                                throw new Error("invalid order refund");
+                                throw new AppError(400, "invalid order refund");
                             }
 
                             const update = await User.updateOne(
@@ -670,7 +628,10 @@ export const marketController = {
                             );
 
                             if (update.matchedCount !== 1) {
-                                throw new Error("inconsistent locked USD");
+                                throw new AppError(
+                                    409,
+                                    "inconsistent locked USD",
+                                );
                             }
 
                             balanceUSDChange = refund;
@@ -694,12 +655,15 @@ export const marketController = {
                             );
 
                             if (update.matchedCount !== 1) {
-                                throw new Error("inconsistent locked stocks");
+                                throw new AppError(
+                                    409,
+                                    "inconsistent locked stocks",
+                                );
                             }
 
                             lockedQtyChange = -remaining;
                         } else {
-                            throw new Error("invalid order type");
+                            throw new AppError(400, "invalid order type");
                         }
 
                         order.status = "cancelled";
@@ -739,7 +703,10 @@ export const marketController = {
                             stock.qty < 0 ||
                             stock.lockedQty !== 0
                         ) {
-                            throw new Error("inconsistent stock balances");
+                            throw new AppError(
+                                409,
+                                "inconsistent stock balances",
+                            );
                         }
 
                         if (stock.outcome === "yes") {
@@ -747,13 +714,14 @@ export const marketController = {
                         } else if (stock.outcome === "no") {
                             totalNo += stock.qty;
                         } else {
-                            throw new Error("invalid stock outcome");
+                            throw new AppError(400, "invalid stock outcome");
                         }
                     }
 
                     // Every issued pair must have one YES and one NO.
                     if (totalYes !== issuedPairs || totalNo !== issuedPairs) {
-                        throw new Error(
+                        throw new AppError(
+                            400,
                             "stock supply does not match totalIssued",
                         );
                     }
@@ -769,7 +737,10 @@ export const marketController = {
                             stock.outcome === outcome ? stock.qty * 100 : 0;
 
                         if (!Number.isSafeInteger(payout)) {
-                            throw new Error("invalid settlement payout");
+                            throw new AppError(
+                                400,
+                                "invalid settlement payout",
+                            );
                         }
 
                         if (payout > 0) {
@@ -784,7 +755,10 @@ export const marketController = {
                             );
 
                             if (credit.matchedCount !== 1) {
-                                throw new Error("settlement user not found");
+                                throw new AppError(
+                                    404,
+                                    "settlement user not found",
+                                );
                             }
 
                             winningContracts += stock.qty;
@@ -806,7 +780,7 @@ export const marketController = {
                         );
 
                         if (burned.matchedCount !== 1) {
-                            throw new Error("failed to burn contracts");
+                            throw new AppError(400, "failed to burn contracts");
                         }
 
                         await Log.create(
@@ -831,7 +805,10 @@ export const marketController = {
                         winningContracts !== issuedPairs ||
                         totalPaid !== expectedPayout
                     ) {
-                        throw new Error("settlement collateral mismatch");
+                        throw new AppError(
+                            400,
+                            "settlement collateral mismatch",
+                        );
                     }
 
                     return {
@@ -851,29 +828,8 @@ export const marketController = {
                 result,
             });
         } catch (error) {
-            if (error instanceof Error) {
-                if (error.message == "admin access required") {
-                    sendResponse(res, 403, "admin access required");
-                }
-                if (error.message == "market not found") {
-                    sendResponse(res, 404, "market not found");
-                }
-                if (
-                    error.message ==
-                    "only the market creator can resolve this market"
-                ) {
-                    sendResponse(
-                        res,
-                        403,
-                        "only the market creator can resolve this market",
-                    );
-                }
-                if (error.message == "market already resolved") {
-                    sendResponse(res, 409, "market already resolved");
-                }
-                if (error.message == "market has not expired yet") {
-                    sendResponse(res, 400, "market has not expired yet");
-                }
+            if (error instanceof AppError) {
+                return sendResponse(res, error.statusCode, error.message);
             }
 
             console.error("error while resolving market:", error);

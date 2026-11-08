@@ -9,6 +9,7 @@ import { Log } from "../model/tx_logs";
 import { Stock } from "../model/stock_balance";
 import { createOrderSchema } from "../types/market";
 import { Fill } from "../model/fills";
+import { AppError } from "../utils/AppError";
 
 // valid market, userId
 // 1) reserve balance, stocks before booking
@@ -54,19 +55,20 @@ export const orderController = {
                         await Market.findById(marketIdParam).session(session);
 
                     if (!market) {
-                        throw new Error("market not found");
+                        throw new AppError(404, "market not found");
                     }
 
                     if (market.resolution == "yes") {
-                        throw new Error("market already resolved");
+                        throw new AppError(400, "market already resolved");
                     }
 
                     if (market.expiry <= new Date()) {
-                        throw new Error("market already expired");
+                        throw new AppError(400, "market already expired");
                     }
 
                     if (market.creatorId.toString() == req.userId) {
-                        throw new Error(
+                        throw new AppError(
+                            400,
                             "creator cannot bet against there own market",
                         );
                     }
@@ -81,14 +83,14 @@ export const orderController = {
                     );
 
                     if (gate.matchedCount != 1) {
-                        throw new Error("market closed");
+                        throw new AppError(400, "market closed");
                     }
 
                     const user = await User.findById(req.userId).session(
                         session,
                     );
                     if (!user) {
-                        throw new Error("user not found");
+                        throw new AppError(404, "user not found");
                     }
                     const userId = user._id;
 
@@ -96,7 +98,7 @@ export const orderController = {
                         marketId: market._id,
                     });
                     if (!orderbook) {
-                        throw new Error("orderbook not found");
+                        throw new AppError(404, "orderbook not found");
                     }
 
                     const sameSideOrderbook = await Orderbook.findOne({
@@ -110,7 +112,7 @@ export const orderController = {
                     });
 
                     if (!sameSideOrderbook || !oppositeSideOrderbook) {
-                        throw new Error("orderbook not found");
+                        throw new AppError(404, "orderbook not found");
                     }
 
                     if (type == "buy") {
@@ -129,7 +131,7 @@ export const orderController = {
                             { returnDocument: "after", session },
                         );
                         if (!locked) {
-                            throw new Error("insufficient balance");
+                            throw new AppError(400, "insufficient balance");
                         }
                         // console.log("BUY reservation completed", locked?._id);
                     } else {
@@ -150,7 +152,7 @@ export const orderController = {
                             { returnDocument: "after", session },
                         );
                         if (!locked) {
-                            throw new Error("insufficient stocks");
+                            throw new AppError(400, "insufficient stocks");
                         }
                     }
 
@@ -348,7 +350,7 @@ export const orderController = {
                                 buyerUpdateResult.matchedCount != 1 ||
                                 makerResult.matchedCount != 1
                             ) {
-                                throw new Error("inconsistent balance");
+                                throw new AppError(400, "inconsistent balance");
                             }
 
                             //here distributing the new stock of 'yes' and 'no'
@@ -420,8 +422,8 @@ export const orderController = {
                             const reserved = buyer.price * matchedQty;
                             const cost = maker.price * matchedQty; // resting maker sets price
                             const refund = reserved - cost;
-                            if (refund < 0) throw new Error("INVALID_PRICE");
-
+                            if (refund < 0)
+                                throw new AppError(400, "invalid price");
                             const buyerPaid = await User.updateOne(
                                 {
                                     _id: buyer.userId,
@@ -444,7 +446,7 @@ export const orderController = {
                                 buyerPaid.matchedCount !== 1 ||
                                 sellerPaid.matchedCount !== 1
                             ) {
-                                throw new Error("inconsistent balance");
+                                throw new AppError(400, "inconsistent balance");
                             }
 
                             const sellerStock = await Stock.updateOne(
@@ -464,7 +466,7 @@ export const orderController = {
                                 { session },
                             );
                             if (sellerStock.matchedCount !== 1) {
-                                throw new Error("inconsistent stock");
+                                throw new AppError(400, "inconsistent stock");
                             }
 
                             await Stock.updateOne(
@@ -545,61 +547,8 @@ export const orderController = {
                 result: result,
             });
         } catch (error) {
-            if (error instanceof Error) {
-                if (error.message === "market not found") {
-                    return sendResponse(res, 404, "market not found");
-                }
-
-                if (error.message === "market already resolved") {
-                    return sendResponse(res, 404, "market already resolved");
-                }
-
-                if (error.message === "market already expired") {
-                    return sendResponse(res, 404, "market already expired");
-                }
-
-                if (
-                    error.message ===
-                    "creator cannot bet against there own market"
-                ) {
-                    return sendResponse(
-                        res,
-                        404,
-                        "creator cannot bet against there own market",
-                    );
-                }
-
-                if (error.message === "market closed") {
-                    return sendResponse(res, 403, "market closed");
-                }
-
-                if (error.message === "user not found") {
-                    return sendResponse(res, 404, "user not found");
-                }
-
-                if (error.message === "orderbook not found") {
-                    return sendResponse(res, 404, "orderbook not found");
-                }
-
-                if (error.message === "orderbook not found") {
-                    return sendResponse(res, 404, "orderbook not found");
-                }
-
-                if (error.message === "inconsistent balance") {
-                    return sendResponse(res, 400, "inconsistent balance");
-                }
-
-                if (error.message === "insufficient balance") {
-                    return sendResponse(res, 400, "insufficient balance");
-                }
-
-                if (error.message === "inconsistent stocks") {
-                    return sendResponse(res, 400, "inconsistent stock");
-                }
-
-                if (error.message === "insufficient stocks") {
-                    return sendResponse(res, 400, "insufficient stock");
-                }
+            if (error instanceof AppError) {
+                return sendResponse(res, error.statusCode, error.message);
             }
             console.log("error while placing order : ", error);
             return sendResponse(res, 500, "failed to place order");
